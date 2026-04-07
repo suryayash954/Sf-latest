@@ -352,14 +352,30 @@ module.exports = cds.service.impl(async function () {
                     auditLogger.info({ original: allGroups.length, sampled: groupsToProcess.length }, 'Applied group sampling');
                 }
 
-                const memberStats = await _fetchAndSaveMembers(
-                    tx,
-                    auditRunID,
-                    groupsToProcess,
-                    sfConfig,
-                    config,
-                    auditLogger
+                // const memberStats = await _fetchAndSaveMembers(
+                //     tx,
+                //     auditRunID,
+                //     groupsToProcess,
+                //     sfConfig,
+                //     config,
+                //     auditLogger
+                // );
+                // Process members with progress updates
+                const totalGroupsToProcess = groupsToProcess.length;
+                let processedGroups = 0;
+                
+                const memberStatsResult = await _fetchAndSaveMembersWithProgress(
+                    tx, auditRunID, groupsToProcess, sfConfig, config, auditLogger,
+                    (processed, total, message) => {
+                        processedGroups = processed;
+                        const progressPercent = 35 + Math.floor((processed / total) * 25);
+                        activeRun.progress = Math.min(progressPercent, 60);
+                        activeRun.message = message || `Processing group ${processed}/${total}...`;
+                        this.activeRuns.set(auditRunID, activeRun);
+                    }
                 );
+                
+                memberStats = memberStatsResult;
 
                 activeRun.progress = 60;
                 await _updateGroupStatistics(tx, auditRunID, auditLogger);
@@ -543,6 +559,53 @@ module.exports = cds.service.impl(async function () {
 
         auditLogger.info({ inserted, updated, total: users.length }, 'User upsert completed');
         return { inserted, updated };
+    }
+    async function _fetchAndSaveMembersWithProgress(tx, auditRunID, groups, sfConfig, config, auditLogger, progressCallback) {
+        const memberships = new Map();
+        let processedGroups = 0;
+
+        auditLogger.info({ groupCount: groups.length }, 'Starting member extraction');
+
+        const groupChunks = [];
+        for (let i = 0; i < groups.length; i += BATCH_CONFIG.API_PARALLEL_LIMIT) {
+            groupChunks.push(groups.slice(i, i + BATCH_CONFIG.API_PARALLEL_LIMIT));
+        }
+
+        for (const chunk of groupChunks) {
+            const chunkPromises = chunk.map(async (group) => {
+                try {
+                    const members = await _fetchGroupMembers(group.groupID, sfConfig, auditLogger);
+                    for (const member of members) {
+                        const membershipKey = `${group.groupID}-${member.userId}`;
+                        if (!memberships.has(membershipKey)) {
+                            memberships.set(membershipKey, {
+                                groupID: group.groupID,
+                                groupName: group.groupName,
+                                userId: member.userId,
+                                userName: member.userName || member.username
+                            });
+                        }
+                    }
+                    processedGroups++;
+                    if (progressCallback) {
+                        progressCallback(processedGroups, groups.length, `Extracting members from group ${processedGroups}/${groups.length}...`);
+                    }
+                } catch (error) {
+                    auditLogger.error({ groupID: group.groupID, error: error.message }, 'Failed to fetch group members');
+                }
+            });
+            await Promise.all(chunkPromises);
+        }
+
+        auditLogger.info({ memberships: memberships.size }, 'Membership data collected');
+        
+        if (progressCallback) {
+            progressCallback(processedGroups, groups.length, 'Saving memberships to database...');
+        }
+        
+        const membershipsSaved = await _saveMemberships(tx, auditRunID, Array.from(memberships.values()), auditLogger);
+
+        return { membershipsProcessed: membershipsSaved };
     }
 
     async function _fetchAndSaveMembers(tx, auditRunID, groups, sfConfig, config, auditLogger) {
