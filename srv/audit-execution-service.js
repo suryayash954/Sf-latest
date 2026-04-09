@@ -91,41 +91,41 @@ module.exports = cds.service.impl(async function () {
         }
     });
     function formatUsers(rawUsers) {
-  const formatted = rawUsers.map(user => ({
-    userId: user.userId,
-    userName: user.userName || user.username || '',
-    firstName: user.firstName || '',
-    lastName: user.lastName || '',
-    status: user.status === 'T' ? 'inactive' : 'active', // map SF status
-    email: user.email || '',
-    hireDate: user.hireDate ? new Date(user.hireDate) : null,
-    terminationDate: user.companyExitDate ? new Date(user.companyExitDate) : null,
-    lastModifiedDateTime: user.lastModifiedDateTime 
-      ? new Date(parseInt(user.lastModifiedDateTime.replace(/\D/g,''))) 
-      : new Date(),
-    timeZone: user.timeZone || '',
-    
-    // Job & Organization
-    jobTitle: user.jobTitle || user.title || '',
-    jobCode: user.jobCode || '',
-    department: user.department || '',
-    division: user.division || '',
-    location: user.location || '',
-    company: user.company || '',           // may need mapping if not directly available
-    businessUnit: user.businessSegment || '',
+        const formatted = rawUsers.map(user => ({
+            userId: user.userId,
+            userName: user.userName || user.username || '',
+            firstName: user.firstName || '',
+            lastName: user.lastName || '',
+            status: user.status === 'T' ? 'inactive' : 'active', // map SF status
+            email: user.email || '',
+            hireDate: user.hireDate ? new Date(user.hireDate) : null,
+            terminationDate: user.companyExitDate ? new Date(user.companyExitDate) : null,
+            lastModifiedDateTime: user.lastModifiedDateTime
+                ? new Date(parseInt(user.lastModifiedDateTime.replace(/\D/g, '')))
+                : new Date(),
+            timeZone: user.timeZone || '',
 
-    // Custom fields
-    custom01: user.custom01 || '',         // Cost Center
-    custom02: user.custom02 || '',
-    custom03: user.custom03 || '',
+            // Job & Organization
+            jobTitle: user.jobTitle || user.title || '',
+            jobCode: user.jobCode || '',
+            department: user.department || '',
+            division: user.division || '',
+            location: user.location || '',
+            company: user.company || '',           // may need mapping if not directly available
+            businessUnit: user.businessSegment || '',
 
-    // Sync metadata
-    lastSyncAt: new Date(),
-    isActive: user.status !== 'T'
-  }));
+            // Custom fields
+            custom01: user.custom01 || '',         // Cost Center
+            custom02: user.custom02 || '',
+            custom03: user.custom03 || '',
 
-  return formatted;
-}
+            // Sync metadata
+            lastSyncAt: new Date(),
+            isActive: user.status !== 'T'
+        }));
+
+        return formatted;
+    }
 
 
     // ============================
@@ -250,6 +250,9 @@ module.exports = cds.service.impl(async function () {
     async function _runAuditAsync(auditRunID, config) {
         const auditLogger = logger.child({ auditRunID, phase: 'AUDIT' });
         const tx = cds.tx();
+        var msprocessed;
+        // var memberStats;
+        let rolesToProcess = [];
 
         const startTime = Date.now();
 
@@ -352,33 +355,18 @@ module.exports = cds.service.impl(async function () {
                     auditLogger.info({ original: allGroups.length, sampled: groupsToProcess.length }, 'Applied group sampling');
                 }
 
-                // const memberStats = await _fetchAndSaveMembers(
-                //     tx,
-                //     auditRunID,
-                //     groupsToProcess,
-                //     sfConfig,
-                //     config,
-                //     auditLogger
-                // );
-                // Process members with progress updates
-                const totalGroupsToProcess = groupsToProcess.length;
-                let processedGroups = 0;
-                
-                const memberStatsResult = await _fetchAndSaveMembersWithProgress(
-                    tx, auditRunID, groupsToProcess, sfConfig, config, auditLogger,
-                    (processed, total, message) => {
-                        processedGroups = processed;
-                        const progressPercent = 35 + Math.floor((processed / total) * 25);
-                        activeRun.progress = Math.min(progressPercent, 60);
-                        activeRun.message = message || `Processing group ${processed}/${total}...`;
-                        this.activeRuns.set(auditRunID, activeRun);
-                    }
+                const memberStats = await _fetchAndSaveMembers(
+                    tx,
+                    auditRunID,
+                    groupsToProcess,
+                    sfConfig,
+                    config,
+                    auditLogger
                 );
-                
-                memberStats = memberStatsResult;
 
-                activeRun.progress = 60;
+                // activeRun.progress = 60;
                 await _updateGroupStatistics(tx, auditRunID, auditLogger);
+                msprocessed = memberStats.membershipsProcessed;
             }
 
             // ============================
@@ -390,7 +378,7 @@ module.exports = cds.service.impl(async function () {
 
                 const roles = await _fetchRolesWithPagination(sfConfig, auditLogger);
 
-                let rolesToProcess = roles;
+                rolesToProcess = roles;
                 if (config.mode === 'SAMPLE' && config.sampleRoleSize > 0) {
                     rolesToProcess = roles.slice(0, config.sampleRoleSize);
                     auditLogger.info({ original: roles.length, sampled: rolesToProcess.length }, 'Applied role sampling');
@@ -419,8 +407,8 @@ module.exports = cds.service.impl(async function () {
                         status: 'COMPLETED',
                         endTime: new Date(),
                         groupsProcessed: groupStats.total || 0,
-                        membershipsProcessed: memberStats?.membershipsProcessed || 0,
-                        rolesProcessed: roleCount || 0
+                        membershipsProcessed: msprocessed || 0,
+                        rolesProcessed: rolesToProcess?.length || 0
                     })
                     .where({ ID: auditRunID })
             );
@@ -430,7 +418,7 @@ module.exports = cds.service.impl(async function () {
             auditLogger.info({
                 executionTime: `${executionTime}ms`,
                 groups: groupStats,
-                members: memberStats
+                members: msprocessed
             }, 'Audit completed successfully');
 
         } catch (error) {
@@ -560,58 +548,12 @@ module.exports = cds.service.impl(async function () {
         auditLogger.info({ inserted, updated, total: users.length }, 'User upsert completed');
         return { inserted, updated };
     }
-    async function _fetchAndSaveMembersWithProgress(tx, auditRunID, groups, sfConfig, config, auditLogger, progressCallback) {
-        const memberships = new Map();
-        let processedGroups = 0;
 
-        auditLogger.info({ groupCount: groups.length }, 'Starting member extraction');
-
-        const groupChunks = [];
-        for (let i = 0; i < groups.length; i += BATCH_CONFIG.API_PARALLEL_LIMIT) {
-            groupChunks.push(groups.slice(i, i + BATCH_CONFIG.API_PARALLEL_LIMIT));
-        }
-
-        for (const chunk of groupChunks) {
-            const chunkPromises = chunk.map(async (group) => {
-                try {
-                    const members = await _fetchGroupMembers(group.groupID, sfConfig, auditLogger);
-                    for (const member of members) {
-                        const membershipKey = `${group.groupID}-${member.userId}`;
-                        if (!memberships.has(membershipKey)) {
-                            memberships.set(membershipKey, {
-                                groupID: group.groupID,
-                                groupName: group.groupName,
-                                userId: member.userId,
-                                userName: member.userName || member.username
-                            });
-                        }
-                    }
-                    processedGroups++;
-                    if (progressCallback) {
-                        progressCallback(processedGroups, groups.length, `Extracting members from group ${processedGroups}/${groups.length}...`);
-                    }
-                } catch (error) {
-                    auditLogger.error({ groupID: group.groupID, error: error.message }, 'Failed to fetch group members');
-                }
-            });
-            await Promise.all(chunkPromises);
-        }
-
-        auditLogger.info({ memberships: memberships.size }, 'Membership data collected');
-        
-        if (progressCallback) {
-            progressCallback(processedGroups, groups.length, 'Saving memberships to database...');
-        }
-        
-        const membershipsSaved = await _saveMemberships(tx, auditRunID, Array.from(memberships.values()), auditLogger);
-
-        return { membershipsProcessed: membershipsSaved };
-    }
 
     async function _fetchAndSaveMembers(tx, auditRunID, groups, sfConfig, config, auditLogger) {
         const memberships = new Set(); // Use Set for deduplication
         let processedGroups = 0;
-        console.log("sfConfig",sfConfig);
+        // console.log("sfConfig", sfConfig);
 
         auditLogger.info({ groupCount: groups.length }, 'Starting member extraction');
 
@@ -625,7 +567,7 @@ module.exports = cds.service.impl(async function () {
             const chunkPromises = chunk.map(async (group) => {
                 try {
                     const members = await _fetchGroupMembers(group.groupID, sfConfig, auditLogger);
-
+                    // console.log(group.groupID," members: ",members.length);
                     for (const member of members) {
                         // Use composite key for deduplication
                         const membershipKey = `${group.groupID}-${member.userId}`;
@@ -663,31 +605,38 @@ module.exports = cds.service.impl(async function () {
     }
 
     async function _fetchGroupMembers(groupId, sfConfig, auditLogger) {
-        // =========================================
-        // ISSUE 
-        // =========================================
-    //     columns_to_select = "userId,userName,firstName,lastName"
-    // api_url = f"{base_url}/getUsersByDynamicGroup?groupId={group_id}L&$format=json&$select={columns_to_select}"
-        // const url = `${sfConfig.baseURL}/getUsersByDynamicGroup?groupId=${parseInt(groupId)}L&$format=json`;
-        const url = `${sfConfig.baseURL}/getUsersByDynamicGroup?groupId=${groupId}L&$format=json&$select=userId,userName,firstName,lastName`;
-        // console.log("url",url);
-        try {
-            const response = await axios.get(url, {
-                auth: sfConfig.auth,
-                headers: sfConfig.headers,
-                httpsAgent: sfConfig.httpsAgent,
-                timeout: sfConfig.timeout
-            });
-            return response.data?.d?.results || [];
+    const url = `${sfConfig.baseURL}/getUsersByDynamicGroup?groupId=${groupId}L&$format=json`;
+    // console.log("Requesting URL:", url);
 
-        } catch (error) {
-            // console.log("\nerror:\n",error);
-            auditLogger.error({ groupId, error: error.message }, 'Failed to fetch group members');
-            return [];
-        }
+    try {
+        const response = await axios.get(url, {
+            auth: sfConfig.auth,
+            headers: sfConfig.headers,
+            httpsAgent: sfConfig.httpsAgent,
+            timeout: sfConfig.timeout
+        });
+
+        // console.log("✅ Axios request succeeded");
+        // console.log("Response status:", response.status);
+        // console.log("Response data:", response.data.length);
+        
+        auditLogger.info({ groupId }, '✅ Axios request succeeded to fetch group members');
+
+        return response.data.d || [];
+
+    } catch (error) {
+        // console.error("❌ Axios request failed");
+        // console.error("Error message:", error.message);
+        // console.error("Error stack:", error.stack);
+
+        auditLogger.error({ groupId, error: error.message }, ' ❌ Axios request Failed to fetch group members');
+        return [];
     }
+}
+
 
     async function _saveMemberships(tx, auditRunID, memberships, auditLogger) {
+
         if (!memberships.length) return 0;
 
         auditLogger.info({ count: memberships.length }, 'Saving memberships');
@@ -893,44 +842,154 @@ module.exports = cds.service.impl(async function () {
             SET activeMembershipCount = (
                 SELECT COUNT(*) 
                 FROM sap_sf_audit_GroupMembers 
-                WHERE GroupMembers.groupID = Groups.groupID 
-                AND GroupMembers.auditRunID_ID = ?
+                WHERE sap_sf_audit_GroupMembers.GROUP_ID = sap_sf_audit_Groups.GROUPID 
+                AND sap_sf_audit_GroupMembers.auditRunID_ID = ?
             )
             WHERE auditRunID_ID = ?
         `, [auditRunID, auditRunID]);
-
-        auditLogger.info('Group statistics updated');
     }
 
     async function _generateAnalytics(tx, auditRunID, auditLogger) {
-        try {
-            // User group count distribution using central Users table
-            await tx.run(`
-                INSERT INTO sap_sf_audit_UserGroupCountDistribution (ID, auditRunID_ID, bucket, userCount)
-                SELECT 
-                    lower(hex(randomblob(16))),
-                    ?,
-                    CASE 
-                        WHEN group_count = 1 THEN '1 group'
-                        WHEN group_count = 2 THEN '2 groups'
-                        WHEN group_count <= 4 THEN '3–4 groups'
-                        WHEN group_count <= 7 THEN '5–7 groups'
-                        ELSE '8+ groups'
-                    END,
-                    COUNT(*)
-                FROM (
-                    SELECT userId, COUNT(*) as group_count
-                    FROM sap_sf_audit_GroupMembers
-                    WHERE auditRunID_ID = ?
-                    GROUP BY userId
-                )
-                GROUP BY bucket
-            `, [auditRunID, auditRunID]);
+    try {
+        // await tx.run(`
+        //     INSERT INTO sap_sf_audit_UserGroupCountDistribution 
+        //     ("ID", "AUDITRUNID_ID", "BUCKET", "USERCOUNT", "ISHIGHESTBUCKET")
+        //     SELECT 
+        //         SYSUUID AS "ID",
+        //         ? AS "AUDITRUNID_ID",
+        //         CASE 
+        //             WHEN group_count = 1 THEN '1 group'
+        //             WHEN group_count = 2 THEN '2 groups'
+        //             WHEN group_count <= 4 THEN '3–4 groups'
+        //             WHEN group_count <= 7 THEN '5–7 groups'
+        //             ELSE '8+ groups'
+        //         END AS "BUCKET",
+        //         COUNT(*) AS "USERCOUNT",
+        //         FALSE AS "ISHIGHESTBUCKET"
+        //     FROM (
+        //         SELECT "USERID", COUNT(*) as group_count
+        //         FROM sap_sf_audit_GroupMembers
+        //         WHERE "AUDITRUNID_ID" = ?
+        //         GROUP BY "USERID"
+        //     )
+        //     GROUP BY 
+        //         CASE 
+        //             WHEN group_count = 1 THEN '1 group'
+        //             WHEN group_count = 2 THEN '2 groups'
+        //             WHEN group_count <= 4 THEN '3–4 groups'
+        //             WHEN group_count <= 7 THEN '5–7 groups'
+        //             ELSE '8+ groups'
+        //         END
+        // `, [auditRunID, auditRunID]);
+        await tx.run(`
+    INSERT INTO sap_sf_audit_UserGroupCountDistribution 
+    ("ID", "AUDITRUNID_ID", "BUCKET", "USERCOUNT", "ISHIGHESTBUCKET")
+    SELECT 
+        SYSUUID AS "ID", -- Use SYSUUID without brackets
+        ? AS "AUDITRUNID_ID",
+        CASE 
+            WHEN group_count = 1 THEN '1 group'
+            WHEN group_count = 2 THEN '2 groups'
+            WHEN group_count <= 4 THEN '3–4 groups'
+            WHEN group_count <= 7 THEN '5–7 groups'
+            ELSE '8+ groups'
+        END AS "BUCKET",
+        COUNT(*) AS "USERCOUNT",
+        FALSE AS "ISHIGHESTBUCKET"
+    FROM (
+        SELECT "USERID", COUNT(*) as group_count
+        FROM sap_sf_audit_GroupMembers
+        WHERE "AUDITRUNID_ID" = ?
+        GROUP BY "USERID"
+    )
+    GROUP BY 
+        CASE 
+            WHEN group_count = 1 THEN '1 group'
+            WHEN group_count = 2 THEN '2 groups'
+            WHEN group_count <= 4 THEN '3–4 groups'
+            WHEN group_count <= 7 THEN '5–7 groups'
+            ELSE '8+ groups'
+        END
+`, [auditRunID, auditRunID]);
 
-            auditLogger.info('Analytics generated');
-
-        } catch (error) {
-            auditLogger.error({ error: error.message }, 'Failed to generate analytics');
-        }
+        auditLogger.info('Analytics generated');
+    } catch (error) {
+        console.log("error", error);
+        auditLogger.error({ error: error.message }, 'Failed to generate analytics');
+        throw error;
     }
+}
+//     async function _generateAnalytics(tx, auditRunID, auditLogger) {
+//     try {
+//         await tx.run(`
+//             INSERT INTO sap_sf_audit_UserGroupCountDistribution 
+//             ("ID", "AUDITRUNID_ID", "BUCKET", "USERCOUNT", "ISHIGHESTBUCKET")
+//             SELECT 
+//                 lower(hex(randomblob(16))) AS "ID",
+//                 ? AS "AUDITRUNID_ID",
+//                 CASE 
+//                     WHEN group_count = 1 THEN '1 group'
+//                     WHEN group_count = 2 THEN '2 groups'
+//                     WHEN group_count <= 4 THEN '3–4 groups'
+//                     WHEN group_count <= 7 THEN '5–7 groups'
+//                     ELSE '8+ groups'
+//                 END AS "BUCKET",
+//                 COUNT(*) AS "USERCOUNT",
+//                 FALSE AS "ISHIGHESTBUCKET"
+//             FROM (
+//                 SELECT "USERID", COUNT(*) as group_count
+//                 FROM sap_sf_audit_GroupMembers
+//                 WHERE "AUDITRUNID_ID" = ?
+//                 GROUP BY "USERID"
+//             )
+//             GROUP BY 
+//                 CASE 
+//                     WHEN group_count = 1 THEN '1 group'
+//                     WHEN group_count = 2 THEN '2 groups'
+//                     WHEN group_count <= 4 THEN '3–4 groups'
+//                     WHEN group_count <= 7 THEN '5–7 groups'
+//                     ELSE '8+ groups'
+//                 END
+//         `, [auditRunID, auditRunID]);
+
+//         auditLogger.info('Analytics generated');
+//     } catch (error) {
+//         console.log("error", error);
+//         auditLogger.error({ error: error.message }, 'Failed to generate analytics');
+//         throw error;
+//     }
+// }
+//     async function _generateAnalytics(tx, auditRunID, auditLogger) {
+//     try {
+//         await tx.run(`
+//             INSERT INTO sap_sf_audit_UserGroupCountDistribution 
+//             ("ID", "AUDITRUNID_ID", "BUCKET", "USERCOUNT", "ISHIGHESTBUCKET")
+//             SELECT 
+//                 lower(hex(randomblob(16))) AS "ID",
+//                 ? AS "AUDITRUNID_ID",
+//                 CASE 
+//                     WHEN group_count = 1 THEN '1 group'
+//                     WHEN group_count = 2 THEN '2 groups'
+//                     WHEN group_count <= 4 THEN '3–4 groups'
+//                     WHEN group_count <= 7 THEN '5–7 groups'
+//                     ELSE '8+ groups'
+//                 END AS "BUCKET",
+//                 COUNT(*) AS "USERCOUNT",
+//                 FALSE AS "ISHIGHESTBUCKET"
+//             FROM (
+//                 SELECT "USERID" as userId, COUNT(*) as group_count
+//                 FROM sap_sf_audit_GroupMembers
+//                 WHERE "AUDITRUNID_ID" = ?
+//                 GROUP BY "USERID"
+//             )
+//             GROUP BY "BUCKET"
+//         `, [auditRunID, auditRunID]);
+
+//         auditLogger.info('Analytics generated');
+//     } catch (error) {
+//         console.log("error",error);
+//         auditLogger.error({ error: error.message }, 'Failed to generate analytics');
+//     }
+// }
+
 });
