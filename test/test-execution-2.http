@@ -1,4 +1,4 @@
-@baseUrl = http://localhost:4004/SuccessFactorRBPAudit
+@baseUrl = https://7a54fbc0trial-dev-sf-permission-audit.cfapps.us10-001.hana.ondemand.com/SuccessFactorRBPAudit
 @contentType = application/json
 
 ###############################################
@@ -14,9 +14,9 @@ Content-Type: {{contentType}}
   "mode": "FULL",
   "extractGroups": true,
   "extractRoles": true,
-  "sampleGroupSize": 0,
-  "sampleMemberSize": 0,
-  "sampleRoleSize": 0
+  "sampleGroupSize": 5,
+  "sampleMemberSize": 10,
+  "sampleRoleSize": 3
 }
 
 ###
