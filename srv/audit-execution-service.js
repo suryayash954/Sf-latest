@@ -396,6 +396,11 @@ module.exports = cds.service.impl(async function () {
 
             await _generateAnalytics(tx, auditRunID, auditLogger);
 
+            //added to new function calls
+
+            await _populateRoleTargetsAndUnusedRoles(tx, auditRunID, sfConfig, auditLogger);  
+            await _generateExecutiveSummary(tx, auditRunID, auditLogger);
+            
             // ============================
             // COMPLETE
             // ============================
@@ -443,7 +448,67 @@ module.exports = cds.service.impl(async function () {
             this.activeRuns.delete(auditRunID);
         }
     }
+    // ============================
+    // GET AUDIT STATUS (with real-time updates)
+    // ============================
+    this.on('getAuditStatus', async (req) => {
+        const { auditRunID } = req.data;
+        const tx = cds.transaction(req);
 
+        try {
+            const auditRun = await tx.run(
+                SELECT.one.from('AuditRuns').where({ ID: auditRunID })
+            );
+
+            if (!auditRun) {
+                req.error(404, `Audit run ${auditRunID} not found`);
+                return;
+            }
+
+            const activeRun = this.activeRuns?.get(auditRunID);
+
+            // Calculate progress based on actual data if audit is running
+            let progress = activeRun?.progress || 0;
+            let currentPhase = activeRun?.message || 'Idle';
+
+            // If audit is running, calculate progress from actual counts
+            if (auditRun.status === 'RUNNING') {
+                let totalGroups = auditRun.groupsProcessed || 0;
+                let totalMembers = auditRun.membershipsProcessed || 0;
+                let totalRoles = auditRun.rolesProcessed || 0;
+
+                // Estimate progress based on what's been processed
+                if (auditRun.mode === 'SAMPLE') {
+                    const targetGroups = auditRun.sampleGroupSize || 5;
+                    const targetMembers = auditRun.sampleMemberSize || 10;
+                    const targetRoles = auditRun.sampleRoleSize || 3;
+                    const totalTarget = targetGroups + targetMembers + targetRoles;
+                    const processed = totalGroups + totalMembers + totalRoles;
+                    progress = totalTarget > 0 ? Math.min(Math.floor((processed / totalTarget) * 100), 99) : 0;
+                } else {
+                    // For FULL mode, progress is based on phases
+                    progress = activeRun?.progress || 0;
+                }
+            }
+
+            return {
+                status: auditRun.status,
+                progress: progress,
+                currentPhase: currentPhase,
+                message: currentPhase,
+                groupCount: auditRun.groupsProcessed || 0,
+                userCount: auditRun.membershipsProcessed || 0,
+                roleCount: auditRun.rolesProcessed || 0,
+                memberCount: 0,
+                startTime: auditRun.startTime,
+                endTime: auditRun.endTime,
+                errorMessage: auditRun.errorMessage
+            };
+
+        } catch (error) {
+            req.error(500, error.message);
+        }
+    });
     // ============================
     // HELPER FUNCTIONS
     // ============================
@@ -605,34 +670,34 @@ module.exports = cds.service.impl(async function () {
     }
 
     async function _fetchGroupMembers(groupId, sfConfig, auditLogger) {
-    const url = `${sfConfig.baseURL}/getUsersByDynamicGroup?groupId=${groupId}L&$format=json`;
-    // console.log("Requesting URL:", url);
+        const url = `${sfConfig.baseURL}/getUsersByDynamicGroup?groupId=${groupId}L&$format=json`;
+        // console.log("Requesting URL:", url);
 
-    try {
-        const response = await axios.get(url, {
-            auth: sfConfig.auth,
-            headers: sfConfig.headers,
-            httpsAgent: sfConfig.httpsAgent,
-            timeout: sfConfig.timeout
-        });
+        try {
+            const response = await axios.get(url, {
+                auth: sfConfig.auth,
+                headers: sfConfig.headers,
+                httpsAgent: sfConfig.httpsAgent,
+                timeout: sfConfig.timeout
+            });
 
-        // console.log("✅ Axios request succeeded");
-        // console.log("Response status:", response.status);
-        // console.log("Response data:", response.data.length);
-        
-        auditLogger.info({ groupId }, '✅ Axios request succeeded to fetch group members');
+            // console.log("✅ Axios request succeeded");
+            // console.log("Response status:", response.status);
+            // console.log("Response data:", response.data.length);
 
-        return response.data.d || [];
+            auditLogger.info({ groupId }, '✅ Axios request succeeded to fetch group members');
 
-    } catch (error) {
-        // console.error("❌ Axios request failed");
-        // console.error("Error message:", error.message);
-        // console.error("Error stack:", error.stack);
+            return response.data.d || [];
 
-        auditLogger.error({ groupId, error: error.message }, ' ❌ Axios request Failed to fetch group members');
-        return [];
+        } catch (error) {
+            // console.error("❌ Axios request failed");
+            // console.error("Error message:", error.message);
+            // console.error("Error stack:", error.stack);
+
+            auditLogger.error({ groupId, error: error.message }, ' ❌ Axios request Failed to fetch group members');
+            return [];
+        }
     }
-}
 
 
     async function _saveMemberships(tx, auditRunID, memberships, auditLogger) {
@@ -702,7 +767,7 @@ module.exports = cds.service.impl(async function () {
             }
 
             auditLogger.info({ url: destination.url }, 'Destination configured');
-
+            console.log("my destination:" + destination)
             return {
                 baseURL: destination.url,
                 auth: {
@@ -850,38 +915,38 @@ module.exports = cds.service.impl(async function () {
     }
 
     async function _generateAnalytics(tx, auditRunID, auditLogger) {
-    try {
-        // await tx.run(`
-        //     INSERT INTO sap_sf_audit_UserGroupCountDistribution 
-        //     ("ID", "AUDITRUNID_ID", "BUCKET", "USERCOUNT", "ISHIGHESTBUCKET")
-        //     SELECT 
-        //         SYSUUID AS "ID",
-        //         ? AS "AUDITRUNID_ID",
-        //         CASE 
-        //             WHEN group_count = 1 THEN '1 group'
-        //             WHEN group_count = 2 THEN '2 groups'
-        //             WHEN group_count <= 4 THEN '3–4 groups'
-        //             WHEN group_count <= 7 THEN '5–7 groups'
-        //             ELSE '8+ groups'
-        //         END AS "BUCKET",
-        //         COUNT(*) AS "USERCOUNT",
-        //         FALSE AS "ISHIGHESTBUCKET"
-        //     FROM (
-        //         SELECT "USERID", COUNT(*) as group_count
-        //         FROM sap_sf_audit_GroupMembers
-        //         WHERE "AUDITRUNID_ID" = ?
-        //         GROUP BY "USERID"
-        //     )
-        //     GROUP BY 
-        //         CASE 
-        //             WHEN group_count = 1 THEN '1 group'
-        //             WHEN group_count = 2 THEN '2 groups'
-        //             WHEN group_count <= 4 THEN '3–4 groups'
-        //             WHEN group_count <= 7 THEN '5–7 groups'
-        //             ELSE '8+ groups'
-        //         END
-        // `, [auditRunID, auditRunID]);
-        await tx.run(`
+        try {
+            // await tx.run(`
+            //     INSERT INTO sap_sf_audit_UserGroupCountDistribution 
+            //     ("ID", "AUDITRUNID_ID", "BUCKET", "USERCOUNT", "ISHIGHESTBUCKET")
+            //     SELECT 
+            //         SYSUUID AS "ID",
+            //         ? AS "AUDITRUNID_ID",
+            //         CASE 
+            //             WHEN group_count = 1 THEN '1 group'
+            //             WHEN group_count = 2 THEN '2 groups'
+            //             WHEN group_count <= 4 THEN '3–4 groups'
+            //             WHEN group_count <= 7 THEN '5–7 groups'
+            //             ELSE '8+ groups'
+            //         END AS "BUCKET",
+            //         COUNT(*) AS "USERCOUNT",
+            //         FALSE AS "ISHIGHESTBUCKET"
+            //     FROM (
+            //         SELECT "USERID", COUNT(*) as group_count
+            //         FROM sap_sf_audit_GroupMembers
+            //         WHERE "AUDITRUNID_ID" = ?
+            //         GROUP BY "USERID"
+            //     )
+            //     GROUP BY 
+            //         CASE 
+            //             WHEN group_count = 1 THEN '1 group'
+            //             WHEN group_count = 2 THEN '2 groups'
+            //             WHEN group_count <= 4 THEN '3–4 groups'
+            //             WHEN group_count <= 7 THEN '5–7 groups'
+            //             ELSE '8+ groups'
+            //         END
+            // `, [auditRunID, auditRunID]);
+            await tx.run(`
     INSERT INTO sap_sf_audit_UserGroupCountDistribution 
     ("ID", "AUDITRUNID_ID", "BUCKET", "USERCOUNT", "ISHIGHESTBUCKET")
     SELECT 
@@ -912,84 +977,248 @@ module.exports = cds.service.impl(async function () {
         END
 `, [auditRunID, auditRunID]);
 
-        auditLogger.info('Analytics generated');
+            auditLogger.info('Analytics generated');
+        } catch (error) {
+            console.log("error", error);
+            auditLogger.error({ error: error.message }, 'Failed to generate analytics');
+            throw error;
+        }
+    }
+    //     async function _generateAnalytics(tx, auditRunID, auditLogger) {
+    //     try {
+    //         await tx.run(`
+    //             INSERT INTO sap_sf_audit_UserGroupCountDistribution 
+    //             ("ID", "AUDITRUNID_ID", "BUCKET", "USERCOUNT", "ISHIGHESTBUCKET")
+    //             SELECT 
+    //                 lower(hex(randomblob(16))) AS "ID",
+    //                 ? AS "AUDITRUNID_ID",
+    //                 CASE 
+    //                     WHEN group_count = 1 THEN '1 group'
+    //                     WHEN group_count = 2 THEN '2 groups'
+    //                     WHEN group_count <= 4 THEN '3–4 groups'
+    //                     WHEN group_count <= 7 THEN '5–7 groups'
+    //                     ELSE '8+ groups'
+    //                 END AS "BUCKET",
+    //                 COUNT(*) AS "USERCOUNT",
+    //                 FALSE AS "ISHIGHESTBUCKET"
+    //             FROM (
+    //                 SELECT "USERID", COUNT(*) as group_count
+    //                 FROM sap_sf_audit_GroupMembers
+    //                 WHERE "AUDITRUNID_ID" = ?
+    //                 GROUP BY "USERID"
+    //             )
+    //             GROUP BY 
+    //                 CASE 
+    //                     WHEN group_count = 1 THEN '1 group'
+    //                     WHEN group_count = 2 THEN '2 groups'
+    //                     WHEN group_count <= 4 THEN '3–4 groups'
+    //                     WHEN group_count <= 7 THEN '5–7 groups'
+    //                     ELSE '8+ groups'
+    //                 END
+    //         `, [auditRunID, auditRunID]);
+
+    //         auditLogger.info('Analytics generated');
+    //     } catch (error) {
+    //         console.log("error", error);
+    //         auditLogger.error({ error: error.message }, 'Failed to generate analytics');
+    //         throw error;
+    //     }
+    // }
+    //     async function _generateAnalytics(tx, auditRunID, auditLogger) {
+    //     try {
+    //         await tx.run(`
+    //             INSERT INTO sap_sf_audit_UserGroupCountDistribution 
+    //             ("ID", "AUDITRUNID_ID", "BUCKET", "USERCOUNT", "ISHIGHESTBUCKET")
+    //             SELECT 
+    //                 lower(hex(randomblob(16))) AS "ID",
+    //                 ? AS "AUDITRUNID_ID",
+    //                 CASE 
+    //                     WHEN group_count = 1 THEN '1 group'
+    //                     WHEN group_count = 2 THEN '2 groups'
+    //                     WHEN group_count <= 4 THEN '3–4 groups'
+    //                     WHEN group_count <= 7 THEN '5–7 groups'
+    //                     ELSE '8+ groups'
+    //                 END AS "BUCKET",
+    //                 COUNT(*) AS "USERCOUNT",
+    //                 FALSE AS "ISHIGHESTBUCKET"
+    //             FROM (
+    //                 SELECT "USERID" as userId, COUNT(*) as group_count
+    //                 FROM sap_sf_audit_GroupMembers
+    //                 WHERE "AUDITRUNID_ID" = ?
+    //                 GROUP BY "USERID"
+    //             )
+    //             GROUP BY "BUCKET"
+    //         `, [auditRunID, auditRunID]);
+
+    //         auditLogger.info('Analytics generated');
+    //     } catch (error) {
+    //         console.log("error",error);
+    //         auditLogger.error({ error: error.message }, 'Failed to generate analytics');
+    //     }
+    // }
+
+
+    // Adding new functions for executive summary and role target population
+    // Add these functions after _generateAnalytics function (around line 400+)
+
+async function _populateRoleTargetsAndUnusedRoles(tx, auditRunID, sfConfig, auditLogger) {
+    try {
+        auditLogger.info('Populating role target populations');
+        
+        // Delete existing
+        await tx.run(DELETE.from('RoleTargetPopulations').where({ auditRunID_ID: auditRunID }));
+        await tx.run(DELETE.from('UnusedRoles').where({ auditRunID_ID: auditRunID }));
+        
+        // Get groups for this audit run
+        const groups = await tx.run(
+            SELECT.from('Groups').where({ auditRunID_ID: auditRunID })
+        );
+        
+        if (!groups.length) {
+            auditLogger.warn('No groups found, skipping role targets');
+            return;
+        }
+        
+        // For each group, try to fetch its role targets from SF
+        for (const group of groups) {
+            try {
+                // Try different endpoints for role targets
+                const roleTargetEndpoints = [
+                    `${sfConfig.baseURL}/DynamicGroup('${group.groupID}')/roleTargets?$format=json`,
+                    `${sfConfig.baseURL}/RBPRule?$filter=groupId eq '${group.groupID}'&$format=json`,
+                    `${sfConfig.baseURL}/getRoleTargetsByGroup?groupId=${group.groupID}&$format=json`
+                ];
+                
+                for (const url of roleTargetEndpoints) {
+                    try {
+                        const response = await axios.get(url, {
+                            auth: sfConfig.auth,
+                            headers: sfConfig.headers,
+                            httpsAgent: sfConfig.httpsAgent,
+                            timeout: 10000
+                        });
+                        
+                        const targets = response.data?.d?.results || [];
+                        if (targets.length > 0) {
+                            auditLogger.debug({ groupId: group.groupID, count: targets.length }, 'Found role targets');
+                            
+                            for (const target of targets) {
+                                await tx.run(`
+                                    INSERT INTO sap_sf_audit_RoleTargetPopulations (
+                                        ID, auditRunID_ID, roleId, roleName, groupId, groupName,
+                                        source, ruleId, ruleMyFilter
+                                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                `, [
+                                    uuidv4(), auditRunID,
+                                    target.roleId || target.id,
+                                    target.roleName || target.name,
+                                    group.groupID, group.groupName,
+                                    'api_fetch',
+                                    target.ruleId || '',
+                                    target.ruleMyFilter || ''
+                                ]);
+                            }
+                            break; // Exit endpoint loop if successful
+                        }
+                    } catch (e) {
+                        // Continue to next endpoint
+                        auditLogger.debug({ groupId: group.groupID, url }, 'Endpoint failed');
+                    }
+                }
+            } catch (error) {
+                auditLogger.debug({ groupId: group.groupID }, 'No role targets found for group');
+            }
+        }
+        
+        // Populate UnusedRoles from roles that have no targets
+        const roles = await tx.run(
+            SELECT.from('Roles').where({ auditRunID_ID: auditRunID })
+        );
+        
+        if (roles.length) {
+            const rolesWithTargets = await tx.run(
+                SELECT.from('RoleTargetPopulations').where({ auditRunID_ID: auditRunID })
+                    .columns('distinct roleId')
+            );
+            
+            const usedRoleIds = new Set(rolesWithTargets.map(r => r.roleId));
+            
+            for (const role of roles) {
+                if (!usedRoleIds.has(role.roleId)) {
+                    await tx.run(`
+                        INSERT INTO sap_sf_audit_UnusedRoles (
+                            ID, auditRunID_ID, roleId, roleName, roleType, recommendation
+                        ) VALUES (?, ?, ?, ?, ?, ?)
+                    `, [
+                        uuidv4(), auditRunID, role.roleId, role.roleName, 
+                        role.roleType || 'standard', 'Review / Decommission'
+                    ]);
+                }
+            }
+        }
+        
+        auditLogger.info('Role targets and unused roles populated');
     } catch (error) {
-        console.log("error", error);
-        auditLogger.error({ error: error.message }, 'Failed to generate analytics');
-        throw error;
+        auditLogger.error({ error: error.message }, 'Failed to populate role targets');
     }
 }
-//     async function _generateAnalytics(tx, auditRunID, auditLogger) {
-//     try {
-//         await tx.run(`
-//             INSERT INTO sap_sf_audit_UserGroupCountDistribution 
-//             ("ID", "AUDITRUNID_ID", "BUCKET", "USERCOUNT", "ISHIGHESTBUCKET")
-//             SELECT 
-//                 lower(hex(randomblob(16))) AS "ID",
-//                 ? AS "AUDITRUNID_ID",
-//                 CASE 
-//                     WHEN group_count = 1 THEN '1 group'
-//                     WHEN group_count = 2 THEN '2 groups'
-//                     WHEN group_count <= 4 THEN '3–4 groups'
-//                     WHEN group_count <= 7 THEN '5–7 groups'
-//                     ELSE '8+ groups'
-//                 END AS "BUCKET",
-//                 COUNT(*) AS "USERCOUNT",
-//                 FALSE AS "ISHIGHESTBUCKET"
-//             FROM (
-//                 SELECT "USERID", COUNT(*) as group_count
-//                 FROM sap_sf_audit_GroupMembers
-//                 WHERE "AUDITRUNID_ID" = ?
-//                 GROUP BY "USERID"
-//             )
-//             GROUP BY 
-//                 CASE 
-//                     WHEN group_count = 1 THEN '1 group'
-//                     WHEN group_count = 2 THEN '2 groups'
-//                     WHEN group_count <= 4 THEN '3–4 groups'
-//                     WHEN group_count <= 7 THEN '5–7 groups'
-//                     ELSE '8+ groups'
-//                 END
-//         `, [auditRunID, auditRunID]);
 
-//         auditLogger.info('Analytics generated');
-//     } catch (error) {
-//         console.log("error", error);
-//         auditLogger.error({ error: error.message }, 'Failed to generate analytics');
-//         throw error;
-//     }
-// }
-//     async function _generateAnalytics(tx, auditRunID, auditLogger) {
-//     try {
-//         await tx.run(`
-//             INSERT INTO sap_sf_audit_UserGroupCountDistribution 
-//             ("ID", "AUDITRUNID_ID", "BUCKET", "USERCOUNT", "ISHIGHESTBUCKET")
-//             SELECT 
-//                 lower(hex(randomblob(16))) AS "ID",
-//                 ? AS "AUDITRUNID_ID",
-//                 CASE 
-//                     WHEN group_count = 1 THEN '1 group'
-//                     WHEN group_count = 2 THEN '2 groups'
-//                     WHEN group_count <= 4 THEN '3–4 groups'
-//                     WHEN group_count <= 7 THEN '5–7 groups'
-//                     ELSE '8+ groups'
-//                 END AS "BUCKET",
-//                 COUNT(*) AS "USERCOUNT",
-//                 FALSE AS "ISHIGHESTBUCKET"
-//             FROM (
-//                 SELECT "USERID" as userId, COUNT(*) as group_count
-//                 FROM sap_sf_audit_GroupMembers
-//                 WHERE "AUDITRUNID_ID" = ?
-//                 GROUP BY "USERID"
-//             )
-//             GROUP BY "BUCKET"
-//         `, [auditRunID, auditRunID]);
-
-//         auditLogger.info('Analytics generated');
-//     } catch (error) {
-//         console.log("error",error);
-//         auditLogger.error({ error: error.message }, 'Failed to generate analytics');
-//     }
-// }
+async function _generateExecutiveSummary(tx, auditRunID, auditLogger) {
+    try {
+        auditLogger.info('Generating executive summary');
+        
+        // Delete existing
+        await tx.run(DELETE.from('ExecutiveSummary').where({ auditRunID_ID: auditRunID }));
+        
+        // Get metrics
+        const metrics = await tx.run(`
+            SELECT 
+                (SELECT COUNT(*) FROM sap_sf_audit_Groups WHERE auditRunID_ID = ? AND groupType = 'STATIC') as totalStaticGroups,
+                (SELECT COUNT(*) FROM sap_sf_audit_Groups WHERE auditRunID_ID = ? AND groupType = 'DYNAMIC') as totalDynamicGroups,
+                (SELECT COUNT(*) FROM sap_sf_audit_Groups WHERE auditRunID_ID = ?) as totalGroups,
+                (SELECT COUNT(DISTINCT userId) FROM sap_sf_audit_GroupMembers WHERE auditRunID_ID = ?) as totalUniqueUsers,
+                (SELECT COUNT(*) FROM sap_sf_audit_UserRoleMappings WHERE auditRunID_ID = ?) as totalRoleAssignments,
+                (SELECT COUNT(*) FROM sap_sf_audit_MultiGroupUsers WHERE auditRunID_ID = ? AND riskLevel = 'High') as highAccessUsersCount,
+                (SELECT COUNT(*) FROM sap_sf_audit_Groups WHERE auditRunID_ID = ? AND totalMemberCount >= 51) as largeGroupsCount,
+                (SELECT COUNT(*) FROM sap_sf_audit_UnusedRoles WHERE auditRunID_ID = ?) as unusedRolesCount
+            FROM DUMMY
+        `, [auditRunID, auditRunID, auditRunID, auditRunID, auditRunID, auditRunID, auditRunID, auditRunID]);
+        
+        const auditRunResult = await tx.run(
+            SELECT.one.from('AuditRuns').where({ ID: auditRunID })
+        );
+        
+        const m = metrics[0];
+        
+        await tx.run(`
+            INSERT INTO sap_sf_audit_ExecutiveSummary (
+                ID, auditRunID_ID, totalStaticGroups, totalDynamicGroups, totalGroups,
+                totalUniqueUsers, usersHighAccess, groupsLargeMembership,
+                highAccessUsersCount, largeGroupsCount,
+                instanceLabel, generationTimestamp, extractionMode
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+            uuidv4(), 
+            auditRunID,
+            Number(m.TOTALSTATICGROUPS) || 0,
+            Number(m.TOTALDYNAMICGROUPS) || 0,
+            Number(m.TOTALGROUPS) || 0,
+            Number(m.TOTALUNIQUEUSERS) || 0,
+            Number(m.HIGHACCESSUSERSCOUNT) || 0,  // usersHighAccess
+            Number(m.LARGEGROUPSCOUNT) || 0,       // groupsLargeMembership
+            Number(m.HIGHACCESSUSERSCOUNT) || 0,   // highAccessUsersCount
+            Number(m.LARGEGROUPSCOUNT) || 0,       // largeGroupsCount
+            auditRunResult.INSTANCE || 'QAS',
+            new Date(),
+            auditRunResult.MODE || 'FULL'
+        ]);
+        
+        auditLogger.info('Executive summary generated successfully');
+        
+    } catch (error) {
+        auditLogger.error({ error: error.message }, 'Failed to generate executive summary');
+        // Don't throw - let audit continue
+    }
+}
 
 });

@@ -64,9 +64,14 @@ service AuditReportingService @(path: '/SuccessFactorRBPReport') {
     /**
      * Get comprehensive risk dashboard for an audit run - Working
      */
-    function getRiskDashboard(
-        auditRunID: UUID
-    ) returns {
+
+    //Added
+    entity RoleTargetPopulations as projection on db.RoleTargetPopulations;  
+    entity GroupSizeDistribution as projection on db.GroupSizeDistribution;  
+    entity StaticVsDynamicGroups as projection on db.StaticVsDynamicGroups;  
+    entity UserGroupCountDistribution as projection on db.UserGroupCountDistribution;  
+
+        function getRiskDashboard(auditRunID: UUID) returns {
         auditInfo: {
             name: String(255);
             instance: String(20);
@@ -91,12 +96,8 @@ service AuditReportingService @(path: '/SuccessFactorRBPReport') {
         };
     };
     
-    /**
-     * Get executive summary for audit run - Not Implemented
-     */
-    function getExecutiveSummary(
-        auditRunID: UUID
-    ) returns {
+    /** Get executive summary - Use GET */
+    function getExecutiveSummary(auditRunID: UUID) returns {
         auditInfo: {
             name: String(255);
             instance: String(20);

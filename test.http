@@ -1,0 +1,5 @@
+### Correct way to call getExecutiveSummary (GET, not POST)
+GET http://localhost:4004/SuccessFactorRBPReport/getExecutiveSummary(auditRunID=0619f345-7ae3-40cf-bf42-6bdadab7342f)
+
+### Or use query parameter
+GET http://localhost:4004/SuccessFactorRBPReport/getExecutiveSummary?auditRunID=06c8e810-25e4-4ab9-a969-67912f806876

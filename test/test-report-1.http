@@ -14,7 +14,7 @@ Content-Type: {{contentType}}
 ############################################################
 ### 2. EXECUTIVE SUMMARY
 ############################################################
-GET {{baseUrl}}/getExecutiveSummary(auditRunID="{{auditId}}")
+GET {{baseUrl}}/getExecutiveSummary(auditRunID="")
 Content-Type: {{contentType}}
 
 
