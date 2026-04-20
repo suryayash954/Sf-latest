@@ -9,6 +9,7 @@ module.exports = cds.service.impl(async function () {
     this.on('getRiskDashboard', getRiskDashboard);
     this.on('getGroupDetails', getGroupDetails);
     this.on('getUserAccessAnalysis', getUserAccessAnalysis);
+    this.on('getInactiveUsersWithAccess', getInactiveUsersWithAccess); 
     this.on('getExecutiveSummary', getExecutiveSummary);
     this.on('getGroupSizeAnalysis', getGroupSizeAnalysis);
     this.on('getUserDetails', getUserDetails);
@@ -195,6 +196,95 @@ module.exports = cds.service.impl(async function () {
             req.error(500, error.message);
         }
     }
+
+    async function getInactiveUsersWithAccess(req) {
+    const { auditRunID, riskCategory = null, top = 100, skip = 0 } = req.data;
+    const tx = cds.transaction(req);
+    
+    try {
+        let query = SELECT.from('InactiveUserAccess')
+            .where({ auditRunID_ID: auditRunID });
+        
+        if (riskCategory) {
+            query = query.where({ riskCategory: riskCategory });
+        }
+        
+        const users = await tx.run(
+            query.orderBy('riskScore desc').limit(top, skip)
+        );
+        
+        return users;
+    } catch (error) {
+        req.error(500, error.message);
+        return [];
+    }
+}
+
+    // ============================
+    // HIGH RISK USERS
+    // ============================
+async function getHighRiskUsers(req) {
+    const { auditRunID, minRiskScore = 5, top = 100, skip = 0 } = req.data;
+    const tx = cds.transaction(req);
+    
+    try {
+        const users = await tx.run(
+            SELECT.from('MultiGroupUsers')
+                .where({ auditRunID_ID: auditRunID, riskScore: { '>=': minRiskScore } })
+                .orderBy('riskScore desc')
+                .limit(top, skip)
+        );
+        
+        return users;
+    } catch (error) {
+        req.error(500, error.message);
+        return [];
+    }
+}
+
+    // ============================
+    // EXPORT FUNCTIONS
+    // ============================ 
+
+async function exportAuditData(req) {
+    const { auditRunID, format = 'JSON' } = req.data;
+    const tx = cds.transaction(req);
+    
+    try {
+        // Fetch all data for this audit run
+        const [auditRun, groups, members, roles, roleTargets, userRoles] = await Promise.all([
+            tx.run(SELECT.one.from('AuditRuns').where({ ID: auditRunID })),
+            tx.run(SELECT.from('Groups').where({ auditRunID_ID: auditRunID })),
+            tx.run(SELECT.from('GroupMembers').where({ auditRunID_ID: auditRunID })),
+            tx.run(SELECT.from('Roles').where({ auditRunID_ID: auditRunID })),
+            tx.run(SELECT.from('RoleTargetPopulations').where({ auditRunID_ID: auditRunID })),
+            tx.run(SELECT.from('UserRoleMappings').where({ auditRunID_ID: auditRunID }))
+        ]);
+        
+        const exportData = {
+            auditRun: auditRun,
+            groups: groups,
+            members: members,
+            roles: roles,
+            roleTargets: roleTargets,
+            userRoleMappings: userRoles,
+            exportedAt: new Date().toISOString()
+        };
+        
+        const jsonString = JSON.stringify(exportData, null, 2);
+        
+        if (format === 'CSV') {
+            // Convert to CSV (simplified)
+            return Buffer.from(jsonString);
+        }
+        
+        return Buffer.from(jsonString);
+        
+    } catch (error) {
+        req.error(500, error.message);
+        return Buffer.from(JSON.stringify({ error: error.message }));
+    }
+}
 
     // ============================
     // EXECUTIVE SUMMARY
@@ -492,44 +582,44 @@ module.exports = cds.service.impl(async function () {
     // ============================
     // HIGH RISK USERS
     // ============================
-    async function getHighRiskUsers(req) {
-        const { auditRunID, top = 100, skip = 0 } = req.data;
-        const tx = cds.transaction(req);
+    // async function getHighRiskUsers(req) {
+    //     const { auditRunID, top = 100, skip = 0 } = req.data;
+    //     const tx = cds.transaction(req);
 
-        try {
-            const users = await tx.run(`
-                SELECT 
-                    userId,
-                    userName,
-                    groupCount,
-                    groupNames,
-                    riskLevel
-                FROM sap_sf_audit_MultiGroupUsers
-                WHERE auditRunID_ID = ? AND riskLevel = 'High'
-                ORDER BY groupCount DESC
-                LIMIT ? OFFSET ?
-            `, [auditRunID, top, skip]);
+    //     try {
+    //         const users = await tx.run(`
+    //             SELECT 
+    //                 userId,
+    //                 userName,
+    //                 groupCount,
+    //                 groupNames,
+    //                 riskLevel
+    //             FROM sap_sf_audit_MultiGroupUsers
+    //             WHERE auditRunID_ID = ? AND riskLevel = 'High'
+    //             ORDER BY groupCount DESC
+    //             LIMIT ? OFFSET ?
+    //         `, [auditRunID, top, skip]);
 
-            return users.map(u => ({
-                userName: u.USERNAME,
-                firstName: '',
-                lastName: '',
-                department: '',
-                jobTitle: '',
-                userStatus: 'active',
-                groupCount: Number(u.GROUPCOUNT || 0),
-                groupNames: u.GROUPNAMES || '',
-                riskLevel: u.RISKLEVEL,
-                riskScore: Number(u.GROUPCOUNT || 0),
-                riskCategory: 'High Risk',
-                recommendedAction: 'Review access immediately',
-                isInactive: false
-            }));
+    //         return users.map(u => ({
+    //             userName: u.USERNAME,
+    //             firstName: '',
+    //             lastName: '',
+    //             department: '',
+    //             jobTitle: '',
+    //             userStatus: 'active',
+    //             groupCount: Number(u.GROUPCOUNT || 0),
+    //             groupNames: u.GROUPNAMES || '',
+    //             riskLevel: u.RISKLEVEL,
+    //             riskScore: Number(u.GROUPCOUNT || 0),
+    //             riskCategory: 'High Risk',
+    //             recommendedAction: 'Review access immediately',
+    //             isInactive: false
+    //         }));
 
-        } catch (error) {
-            req.error(500, error.message);
-        }
-    }
+    //     } catch (error) {
+    //         req.error(500, error.message);
+    //     }
+    // }
 
     // ============================
     // ROLE DETAILS
@@ -836,9 +926,7 @@ module.exports = cds.service.impl(async function () {
     // ============================
     // EXPORT FUNCTIONS
     // ============================
-    async function exportAuditData(req) {
-        return Buffer.from(JSON.stringify({ message: 'Export not implemented yet' }));
-    }
+
 
     async function exportReport(req) {
         return Buffer.from(JSON.stringify({ message: 'Export not implemented yet' }));

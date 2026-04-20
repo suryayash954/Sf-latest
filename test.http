@@ -1,5 +1,396 @@
-### Correct way to call getExecutiveSummary (GET, not POST)
-GET http://localhost:4004/SuccessFactorRBPReport/getExecutiveSummary(auditRunID=0619f345-7ae3-40cf-bf42-6bdadab7342f)
+### Test File for SuccessFactors Audit Service
+### Base URLs:
+### - Audit Service: http://localhost:4004/SuccessFactorRBPAudit
+### Make sure your CAP server is running: cds watch
 
-### Or use query parameter
-GET http://localhost:4004/SuccessFactorRBPReport/getExecutiveSummary?auditRunID=06c8e810-25e4-4ab9-a969-67912f806876
+#########################################
+### 1. GET AVAILABLE INSTANCES (Value Help for UI)
+#########################################
+
+### Get all SuccessFactors instances configured with sfaudit=true
+GET http://localhost:4004/SuccessFactorRBPAudit/getAvailableInstances()
+Content-Type: application/json
+
+
+#########################################
+### 2. USER MANAGEMENT
+#########################################
+
+### Sync Users from a specific instance
+POST http://localhost:4004/SuccessFactorRBPAudit/syncUsers
+Content-Type: application/json
+
+{
+    "instance": "successfactors"
+}
+
+### Expected Response:
+# {
+#   "success": true,
+#   "message": "Users synchronized successfully from SF_PROD",
+#   "stats": {
+#     "inserted": 150,
+#     "updated": 25,
+#     "total": 175,
+#     "timestamp": "2026-04-17T10:30:00.000Z"
+#   }
+# }
+
+
+### Get Users (All instances)
+POST http://localhost:4004/SuccessFactorRBPAudit/getUsers
+Content-Type: application/json
+
+{
+    "top": 10,
+    "skip": 0
+}
+
+### Get Users filtered by instance
+POST http://localhost:4004/SuccessFactorRBPAudit/getUsers
+Content-Type: application/json
+
+{
+    "top": 10,
+    "skip": 0,
+    "instance": "SF_PROD",
+    "status": "active",
+    "search": "john"
+}
+
+### Expected Response:
+# {
+#   "success": true,
+#   "users": [
+#     {
+#       "userId": "john.doe",
+#       "userName": "john.doe",
+#       "firstName": "John",
+#       "lastName": "Doe",
+#       "status": "active",
+#       "email": "john.doe@company.com",
+#       "instance": "SF_PROD"
+#     }
+#   ],
+#   "total": 150,
+#   "top": 10,
+#   "skip": 0
+# }
+
+
+#########################################
+### 3. AUDIT RUN MANAGEMENT
+#########################################
+
+### Create a new Audit Run (FULL mode with Groups and Roles)
+POST http://localhost:4004/SuccessFactorRBPAudit/AuditRuns
+Content-Type: application/json
+
+{
+    "name": "Monthly Security Audit - PROD",
+    "description": "Full audit of all groups and roles",
+    "mode": "FULL",
+    "instance": "SF_PROD",
+    "extractGroups": true,
+    "extractRoles": true,
+    "sampleGroupSize": 0,
+    "sampleMemberSize": 0,
+    "sampleRoleSize": 0
+}
+
+### Expected Response:
+# {
+#   "ID": "123e4567-e89b-12d3-a456-426614174000",
+#   "name": "Monthly Security Audit - PROD",
+#   "status": "CREATED",
+#   "mode": "FULL",
+#   "instance": "SF_PROD",
+#   "createdAt": "2026-04-17T10:30:00.000Z"
+# }
+
+
+### Create a SAMPLE Audit Run (for testing)
+POST http://localhost:4004/SuccessFactorRBPAudit/AuditRuns
+Content-Type: application/json
+
+{
+    "name": "Sample Audit - QAS (Test)",
+    "description": "Sample audit for testing",
+    "mode": "SAMPLE",
+    "instance": "SF_QAS",
+    "extractGroups": true,
+    "extractRoles": true,
+    "sampleGroupSize": 5,
+    "sampleMemberSize": 10,
+    "sampleRoleSize": 3
+}
+
+
+### Create an Audit Run with Groups only (no Roles)
+POST http://localhost:4004/SuccessFactorRBPAudit/AuditRuns
+Content-Type: application/json
+
+{
+    "name": "Groups Only Audit",
+    "description": "Extract only groups and members",
+    "mode": "FULL",
+    "instance": "SF_PROD",
+    "extractGroups": true,
+    "extractRoles": false,
+    "sampleGroupSize": 0,
+    "sampleMemberSize": 0,
+    "sampleRoleSize": 0
+}
+
+
+### Create an Audit Run with Roles only (no Groups)
+POST http://localhost:4004/SuccessFactorRBPAudit/AuditRuns
+Content-Type: application/json
+
+{
+    "name": "Roles Only Audit", 
+    "description": "Extract only roles",
+    "mode": "FULL",
+    "instance": "SF_PROD",
+    "extractGroups": false,
+    "extractRoles": true,
+    "sampleGroupSize": 0,
+    "sampleMemberSize": 0,
+    "sampleRoleSize": 0
+}
+
+
+### Get Audit Status (Replace {auditRunID} with actual ID)
+GET http://localhost:4004/SuccessFactorRBPAudit/getAuditStatus(auditRunID=123e4567-e89b-12d3-a456-426614174000)
+Content-Type: application/json
+
+### Expected Response:
+# {
+#   "status": "RUNNING",
+#   "progress": 45,
+#   "currentPhase": "Extracting group members...",
+#   "groupCount": 25,
+#   "userCount": 1250,
+#   "roleCount": 0
+# }
+
+
+### List all Audit Runs
+POST http://localhost:4004/SuccessFactorRBPAudit/listAuditRuns
+Content-Type: application/json
+
+{
+    "top": 20,
+    "skip": 0
+}
+
+### List Audit Runs filtered by instance
+POST http://localhost:4004/SuccessFactorRBPAudit/listAuditRuns
+Content-Type: application/json
+
+{
+    "status": "COMPLETED",
+    "instance": "SF_PROD",
+    "top": 10,
+    "skip": 0
+}
+
+### Expected Response:
+# [
+#   {
+#     "ID": "123e4567...",
+#     "name": "Monthly Security Audit",
+#     "status": "COMPLETED",
+#     "mode": "FULL",
+#     "instance": "SF_PROD",
+#     "startTime": "2026-04-17T10:30:00Z",
+#     "endTime": "2026-04-17T10:35:00Z"
+#   }
+# ]
+
+
+### Delete an Audit Run (Replace {auditRunID})
+POST http://localhost:4004/SuccessFactorRBPAudit/deleteAuditRun
+Content-Type: application/json
+
+{
+    "auditRunID": "123e4567-e89b-12d3-a456-426614174000"
+}
+
+
+#########################################
+### 4. DIRECT ENTITY QUERIES (Read-only)
+#########################################
+
+### Get all Audit Runs (Direct OData)
+GET http://localhost:4004/SuccessFactorRBPAudit/AuditRuns?$top=10&$orderby=createdAt desc
+Content-Type: application/json
+
+### Get Audit Runs filtered by instance
+GET http://localhost:4004/SuccessFactorRBPAudit/AuditRuns?$filter=instance eq 'SF_PROD'&$top=10
+Content-Type: application/json
+
+### Get Users from specific instance
+GET http://localhost:4004/SuccessFactorRBPAudit/Users?$filter=instance eq 'SF_PROD'&$top=20
+Content-Type: application/json
+
+### Get Groups for a specific audit run
+GET http://localhost:4004/SuccessFactorRBPAudit/Groups?$filter=auditRunID_ID eq '123e4567-e89b-12d3-a456-426614174000'&$top=50
+Content-Type: application/json
+
+### Get Group Members for a specific audit run
+GET http://localhost:4004/SuccessFactorRBPAudit/GroupMembers?$filter=auditRunID_ID eq '123e4567-e89b-12d3-a456-426614174000'&$top=100
+Content-Type: application/json
+
+### Get Roles for a specific audit run
+GET http://localhost:4004/SuccessFactorRBPAudit/Roles?$filter=auditRunID_ID eq '123e4567-e89b-12d3-a456-426614174000'
+Content-Type: application/json
+
+
+#########################################
+### 5. ERROR TESTING (Expected failures)
+#########################################
+
+### Missing required fields (should fail)
+POST http://localhost:4004/SuccessFactorRBPAudit/AuditRuns
+Content-Type: application/json
+
+{
+    "name": "Test",
+    "mode": "FULL"
+    # Missing "instance" field
+}
+
+### Invalid instance (should fail)
+POST http://localhost:4004/SuccessFactorRBPAudit/AuditRuns
+Content-Type: application/json
+
+{
+    "name": "Invalid Instance Test",
+    "mode": "FULL",
+    "instance": "NON_EXISTENT_INSTANCE",
+    "extractGroups": true,
+    "extractRoles": true
+}
+
+### Sync users without instance (should fail)
+POST http://localhost:4004/SuccessFactorRBPAudit/syncUsers
+Content-Type: application/json
+
+{
+    # Missing "instance" field
+}
+
+### Invalid mode (should fail)
+POST http://localhost:4004/SuccessFactorRBPAudit/AuditRuns
+Content-Type: application/json
+
+{
+    "name": "Invalid Mode Test",
+    "mode": "INVALID_MODE",
+    "instance": "SF_PROD"
+}
+
+
+#########################################
+### 6. WORKFLOW TEST (Complete flow)
+#########################################
+
+### Step 1: Get available instances
+GET http://localhost:4004/SuccessFactorRBPAudit/getAvailableInstances()
+
+### Step 2: Sync users from PROD
+POST http://localhost:4004/SuccessFactorRBPAudit/syncUsers
+Content-Type: application/json
+
+{
+    "instance": "SF_PROD"
+}
+
+### Step 3: Verify users were synced
+POST http://localhost:4004/SuccessFactorRBPAudit/getUsers
+Content-Type: application/json
+
+{
+    "instance": "SF_PROD",
+    "top": 5
+}
+
+### Step 4: Create an audit run
+POST http://localhost:4004/SuccessFactorRBPAudit/AuditRuns
+Content-Type: application/json
+
+{
+    "name": "Complete Workflow Test",
+    "description": "Testing full audit workflow",
+    "mode": "SAMPLE",
+    "instance": "SF_PROD",
+    "extractGroups": true,
+    "extractRoles": true,
+    "sampleGroupSize": 3,
+    "sampleMemberSize": 5,
+    "sampleRoleSize": 2
+}
+
+### Save the returned ID from Step 4, then use it in Steps 5-7
+### Replace {auditRunID} with the actual ID
+
+### Step 5: Check audit status (repeat until COMPLETED)
+GET http://localhost:4004/SuccessFactorRBPAudit/getAuditStatus(auditRunID={auditRunID})
+
+### Step 6: View audit results - Groups
+GET http://localhost:4004/SuccessFactorRBPAudit/Groups?$filter=auditRunID_ID eq '{auditRunID}'&$top=10
+
+### Step 7: View audit results - Group Members
+GET http://localhost:4004/SuccessFactorRBPAudit/GroupMembers?$filter=auditRunID_ID eq '{auditRunID}'&$top=20
+
+### Step 8: List all audit runs for PROD instance
+POST http://localhost:4004/SuccessFactorRBPAudit/listAuditRuns
+Content-Type: application/json
+
+{
+    "instance": "SF_PROD",
+    "top": 10
+}
+
+
+#########################################
+### 7. HANA CLOUD (If using HANA DB)
+#########################################
+
+### If you're using HANA Cloud instead of SQLite, use these endpoints:
+
+### Get all Audit Runs
+GET http://localhost:4004/odata/v4/SuccessFactorRBPAudit/AuditRuns
+
+### Get Users
+GET http://localhost:4004/odata/v4/SuccessFactorRBPAudit/Users
+
+### Get Groups with expand
+GET http://localhost:4004/odata/v4/SuccessFactorRBPAudit/Groups?$expand=members
+
+### Get Audit Run with all related data
+GET http://localhost:4004/odata/v4/SuccessFactorRBPAudit/AuditRuns?$expand=groups,roles
+
+
+#########################################
+### 8. BATCH OPERATIONS (Multiple requests)
+#########################################
+
+### Batch request to get multiple entities
+POST http://localhost:4004/SuccessFactorRBPAudit/$batch
+Content-Type: multipart/mixed; boundary=batch_123
+
+--batch_123
+Content-Type: application/http
+Content-Transfer-Encoding: binary
+
+GET AuditRuns?$top=5 HTTP/1.1
+
+--batch_123
+Content-Type: application/http
+Content-Transfer-Encoding: binary
+
+GET Users?$top=5&$filter=instance eq 'SF_PROD' HTTP/1.1
+
+--batch_123--

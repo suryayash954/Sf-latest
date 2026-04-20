@@ -12,6 +12,7 @@ entity AuditRuns : managed {
         description : String(1000);
         status  : String(20) default 'CREATED';
         mode    : String(20); // FULL, SAMPLE
+        instance : String(100);                         //Added 17-04-2026
         sampleGroupSize : Integer default 0;
         sampleMemberSize : Integer default 0;
         sampleRoleSize : Integer default 0;
@@ -73,6 +74,7 @@ entity GroupMembers {
  */
 entity Users : managed {
     key userId     : String(100);  // Natural key from SuccessFactors
+        instance   : String(100);                                        //Added 17-04-2026
         userName   : String(255) @title: 'Username';
         firstName  : String(255);
         lastName   : String(255);

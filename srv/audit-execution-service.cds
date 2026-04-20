@@ -14,12 +14,24 @@ service AuditExecutionService @(path: '/SuccessFactorRBPAudit') {
   entity Roles as projection on db.Roles;
   
   // ============================================
+  // Get Available Instances (Value Help for UI)
+  // ============================================
+  
+  function getAvailableInstances() returns array of {
+    name: String(100);
+    url: String(500);
+  };
+  
+  // ============================================
   // Actions for User Management
   // ============================================
   
-  action syncUsers() returns {
+  action syncUsers(
+    instance: String(100)
+  ) returns {
     success: Boolean;
     message: String(255);
+    alreadySynced: Boolean;
     stats: {
       inserted: Integer;
       updated: Integer;
@@ -27,12 +39,27 @@ service AuditExecutionService @(path: '/SuccessFactorRBPAudit') {
       timestamp: Timestamp;
     };
   };
+
+  action syncUsersIncremental(
+    instance: String(100),
+    lastSyncDate: Timestamp
+) returns {
+    success: Boolean;
+    message: String(255);
+    stats: {
+        inserted: Integer;
+        updated: Integer;
+        total: Integer;
+        timestamp: Timestamp;
+    };
+};
   
   action getUsers(
     top: Integer default 100,
     skip: Integer default 0,
     status: String(20),
-    search: String(255)
+    search: String(255),
+    instance: String(100)
   ) returns {
     success: Boolean;
     data: {
@@ -46,6 +73,7 @@ service AuditExecutionService @(path: '/SuccessFactorRBPAudit') {
       jobTitle: String(255);
       department: String(255);
       lastModifiedDateTime: Timestamp;
+      instance: String(100);
     };
     pagination: {
       total: Integer;
@@ -80,6 +108,7 @@ service AuditExecutionService @(path: '/SuccessFactorRBPAudit') {
   
   function listAuditRuns(
     status: String(20) default null,
+    instance: String(100) default null,
     top: Integer default 50,
     skip: Integer default 0
   ) returns array of {
@@ -88,6 +117,7 @@ service AuditExecutionService @(path: '/SuccessFactorRBPAudit') {
     description: String(1000);
     status: String(20);
     mode: String(20);
+    instance: String(100);
     startTime: Timestamp;
     endTime: Timestamp;
     createdAt: Timestamp;
@@ -100,6 +130,7 @@ service AuditExecutionService @(path: '/SuccessFactorRBPAudit') {
     name: String(255);
     description: String(1000);
     mode: String(20);
+    instance: String(100);
     extractGroups: Boolean;
     extractRoles: Boolean;
     sampleGroupSize: Integer;
