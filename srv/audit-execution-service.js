@@ -59,51 +59,70 @@ module.exports = cds.service.impl(async function () {
     // ============================
 
     // Helper: Get SF Destination Config
-    async function _getSFDestination(instanceName, auditLogger, req) {
-        try {
-            // Get JWT for authentication
-            const jwt = req ? getJwt(req) : null;
-
-            // Use getDestination with JWT
-            const destination = await getDestination({
-                destinationName: instanceName,
-                jwt: jwt
-            });
-
-            if (!destination) {
-                throw new Error(`Destination '${instanceName}' not found`);
-            }
-
-            // Check sfaudit property from originalProperties
-            const hasSFAudit = destination.originalProperties?.sfaudit === 'true' ||
-                destination.originalProperties?.sfaudit === true;
-
-            if (!hasSFAudit) {
-                throw new Error(`Destination '${instanceName}' is not configured for SF Audit (missing sfaudit=true)`);
-            }
-
-            auditLogger.info({ instance: instanceName, url: destination.url }, 'Destination configured');
-
-            return {
-                baseURL: destination.url,
-                auth: {
-                    username: destination.username,
-                    password: destination.password
-                },
-                headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json',
-                },
-                httpsAgent: new https.Agent({ rejectUnauthorized: false }),
-                timeout: 30000,
-                instanceName: instanceName
-            };
-
-        } catch (error) {
-            auditLogger.error({ error: error.message, instance: instanceName }, 'Failed to get SF destination');
-            throw error;
-        }
+async function _getSFDestination(instanceName, auditLogger, req) {
+    // Check if running locally (not in Cloud Foundry)
+    const isLocal = !process.env.VCAP_APPLICATION;
+    
+    // LOCAL DEVELOPMENT: Use hardcoded credentials
+    if (isLocal) {
+        auditLogger.info('LOCAL MODE: Using hardcoded SF configuration');
+        return {
+            baseURL: 'https://api68sales.successfactors.com/odata/v2',
+            auth: {
+                username: 'igrant@SFSALES010236',
+                password: 'AIdemo@24'
+            },
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+            },
+            httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+            timeout: 120000,
+            instanceName: instanceName
+        };
     }
+    
+    // CLOUD MODE: Use Destination Service
+    try {
+        const jwt = req ? getJwt(req) : null;
+        const destination = await getDestination({
+            destinationName: instanceName,
+            jwt: jwt
+        });
+
+        if (!destination) {
+            throw new Error(`Destination '${instanceName}' not found`);
+        }
+
+        const hasSFAudit = destination.originalProperties?.sfaudit === 'true' ||
+            destination.originalProperties?.sfaudit === true;
+
+        if (!hasSFAudit) {
+            throw new Error(`Destination '${instanceName}' is not configured for SF Audit (missing sfaudit=true)`);
+        }
+
+        auditLogger.info({ instance: instanceName, url: destination.url }, 'Destination configured');
+
+        return {
+            baseURL: destination.url,
+            auth: {
+                username: destination.username,
+                password: destination.password
+            },
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+            },
+            httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+            timeout: 120000,
+            instanceName: instanceName
+        };
+
+    } catch (error) {
+        auditLogger.error({ error: error.message, instance: instanceName }, 'Failed to get SF destination');
+        throw error;
+    }
+}
 
     // Fetch all users from SuccessFactors
     async function _fetchAllUsers(sfConfig, auditLogger) {
@@ -429,18 +448,18 @@ module.exports = cds.service.impl(async function () {
     }
 
     // Update group statistics
-    async function _updateGroupStatistics(tx, auditRunID, auditLogger) {
-        await tx.run(`
-            UPDATE sap_sf_audit_Groups 
-            SET activeMembershipCount = (
-                SELECT COUNT(*) 
-                FROM sap_sf_audit_GroupMembers 
-                WHERE sap_sf_audit_GroupMembers.GROUP_ID = sap_sf_audit_Groups.GROUPID 
-                AND sap_sf_audit_GroupMembers.auditRunID_ID = ?
-            )
-            WHERE auditRunID_ID = ?
-        `, [auditRunID, auditRunID]);
-    }
+        async function _updateGroupStatistics(tx, auditRunID, auditLogger) {
+            await tx.run(`
+                UPDATE sap_sf_audit_Groups 
+                SET activeMembershipCount = (
+                    SELECT COUNT(*) 
+                    FROM sap_sf_audit_GroupMembers 
+                    WHERE sap_sf_audit_GroupMembers.GROUPID = sap_sf_audit_Groups.GROUPID 
+                    AND sap_sf_audit_GroupMembers.auditRunID_ID = ?
+                )
+                WHERE auditRunID_ID = ?
+            `, [auditRunID, auditRunID]);
+        }
 
     // Fetch roles with pagination
     async function _fetchRolesWithPagination(sfConfig, auditLogger) {
@@ -670,60 +689,62 @@ module.exports = cds.service.impl(async function () {
     }
 }
     // Generate executive summary
-    async function _generateExecutiveSummary(tx, auditRunID, auditLogger) {
-        try {
-            auditLogger.info('Generating executive summary');
-
-            await tx.run(DELETE.from('ExecutiveSummary').where({ auditRunID_ID: auditRunID }));
-
-            const metrics = await tx.run(`
-                SELECT 
-                    (SELECT COUNT(*) FROM sap_sf_audit_Groups WHERE auditRunID_ID = ? AND groupType = 'STATIC') as totalStaticGroups,
-                    (SELECT COUNT(*) FROM sap_sf_audit_Groups WHERE auditRunID_ID = ? AND groupType = 'DYNAMIC') as totalDynamicGroups,
-                    (SELECT COUNT(*) FROM sap_sf_audit_Groups WHERE auditRunID_ID = ?) as totalGroups,
-                    (SELECT COUNT(DISTINCT userId) FROM sap_sf_audit_GroupMembers WHERE auditRunID_ID = ?) as totalUniqueUsers,
-                    (SELECT COUNT(*) FROM sap_sf_audit_UserRoleMappings WHERE auditRunID_ID = ?) as totalRoleAssignments,
-                    (SELECT COUNT(*) FROM sap_sf_audit_MultiGroupUsers WHERE auditRunID_ID = ? AND riskLevel = 'High') as highAccessUsersCount,
-                    (SELECT COUNT(*) FROM sap_sf_audit_Groups WHERE auditRunID_ID = ? AND totalMemberCount >= 51) as largeGroupsCount,
-                    (SELECT COUNT(*) FROM sap_sf_audit_UnusedRoles WHERE auditRunID_ID = ?) as unusedRolesCount
-                FROM DUMMY
-            `, [auditRunID, auditRunID, auditRunID, auditRunID, auditRunID, auditRunID, auditRunID, auditRunID]);
-
-            const auditRunResult = await tx.run(
-                SELECT.one.from('AuditRuns').where({ ID: auditRunID })
-            );
-
-            const m = metrics[0];
-
-            await tx.run(`
-                INSERT INTO sap_sf_audit_ExecutiveSummary (
-                    ID, auditRunID_ID, totalStaticGroups, totalDynamicGroups, totalGroups,
-                    totalUniqueUsers, usersHighAccess, groupsLargeMembership,
-                    highAccessUsersCount, largeGroupsCount,
-                    instanceLabel, generationTimestamp, extractionMode
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `, [
-                uuidv4(),
-                auditRunID,
-                Number(m.TOTALSTATICGROUPS) || 0,
-                Number(m.TOTALDYNAMICGROUPS) || 0,
-                Number(m.TOTALGROUPS) || 0,
-                Number(m.TOTALUNIQUEUSERS) || 0,
-                Number(m.HIGHACCESSUSERSCOUNT) || 0,
-                Number(m.LARGEGROUPSCOUNT) || 0,
-                Number(m.HIGHACCESSUSERSCOUNT) || 0,
-                Number(m.LARGEGROUPSCOUNT) || 0,
-                auditRunResult.INSTANCE || 'QAS',
-                new Date(),
-                auditRunResult.MODE || 'FULL'
-            ]);
-
-            auditLogger.info('Executive summary generated successfully');
-
-        } catch (error) {
-            auditLogger.error({ error: error.message }, 'Failed to generate executive summary');
-        }
+ async function _generateExecutiveSummary(tx, auditRunID, auditLogger) {
+    try {
+        auditLogger.info('Generating executive summary');
+        
+        await tx.run(DELETE.from('ExecutiveSummary').where({ auditRunID_ID: auditRunID }));
+        
+        // Get audit run info
+        const auditRunResult = await tx.run(
+            SELECT.one.from('AuditRuns').where({ ID: auditRunID })
+        );
+        
+        // Calculate metrics directly from tables
+        const metrics = await tx.run(`
+            SELECT 
+                (SELECT COUNT(*) FROM sap_sf_audit_Groups WHERE auditRunID_ID = ? AND groupType = 'STATIC') as totalStaticGroups,
+                (SELECT COUNT(*) FROM sap_sf_audit_Groups WHERE auditRunID_ID = ? AND groupType = 'DYNAMIC') as totalDynamicGroups,
+                (SELECT COUNT(*) FROM sap_sf_audit_Groups WHERE auditRunID_ID = ?) as totalGroups,
+                (SELECT COUNT(DISTINCT userId) FROM sap_sf_audit_GroupMembers WHERE auditRunID_ID = ?) as totalUniqueUsers,
+                (SELECT COUNT(*) FROM sap_sf_audit_MultiGroupUsers WHERE auditRunID_ID = ? AND riskLevel = 'High') as highAccessUsersCount,
+                (SELECT COUNT(*) FROM sap_sf_audit_Groups WHERE auditRunID_ID = ? AND totalMemberCount >= 51) as largeGroupsCount
+            FROM DUMMY
+        `, [auditRunID, auditRunID, auditRunID, auditRunID, auditRunID, auditRunID]);
+        
+        const m = metrics[0];
+        
+        await tx.run(`
+            INSERT INTO sap_sf_audit_ExecutiveSummary 
+            (ID, auditRunID_ID, totalStaticGroups, totalDynamicGroups, totalGroups,
+             totalUniqueUsers, usersHighAccess, groupsLargeMembership,
+             highAccessUsersCount, largeGroupsCount,
+             instanceLabel, generationTimestamp, extractionMode)
+            VALUES (SYSUUID, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+            auditRunID,
+            Number(m.TOTALSTATICGROUPS) || 0,
+            Number(m.TOTALDYNAMICGROUPS) || 0,
+            Number(m.TOTALGROUPS) || 0,
+            Number(m.TOTALUNIQUEUSERS) || 0,
+            Number(m.HIGHACCESSUSERSCOUNT) || 0,
+            Number(m.LARGEGROUPSCOUNT) || 0,
+            Number(m.HIGHACCESSUSERSCOUNT) || 0,
+            Number(m.LARGEGROUPSCOUNT) || 0,
+            auditRunResult?.INSTANCE || 'QAS',
+            new Date(),
+            auditRunResult?.MODE || 'FULL'
+        ]);
+        
+        // Verify data was inserted
+        const result = await tx.run(`SELECT COUNT(*) as cnt FROM sap_sf_audit_ExecutiveSummary WHERE auditRunID_ID = ?`, [auditRunID]);
+        auditLogger.info({ insertedCount: result[0]?.CNT }, 'Executive summary populated');
+        
+    } catch (error) {
+        auditLogger.error({ error: error.message, stack: error.stack }, 'Failed to generate executive summary');
+        throw error;  // Don't swallow the error
     }
+}
 
     //identify users with 5+ groups
     async function _populateMultiGroupUsers(tx, auditRunID, auditLogger) {
@@ -811,28 +832,40 @@ async function _populateGroupSizeDistribution(tx, auditRunID, auditLogger) {
         
         await tx.run(DELETE.from('GroupSizeDistribution').where({ auditRunID_ID: auditRunID }));
         
+        // Use raw SQL with proper UUID generation for HANA
         await tx.run(`
             INSERT INTO sap_sf_audit_GroupSizeDistribution 
             (ID, auditRunID_ID, bucket, groupCount)
             SELECT 
-                ? AS ID,
-                ? AS auditRunID_ID,
+                SYSUUID,
+                ?,
                 CASE 
                     WHEN totalMemberCount <= 5 THEN '1–5 members'
                     WHEN totalMemberCount <= 20 THEN '6–20 members'
                     WHEN totalMemberCount <= 50 THEN '21–50 members'
                     WHEN totalMemberCount <= 100 THEN '51–100 members'
                     ELSE '100+ members'
-                END AS bucket,
-                COUNT(*) AS groupCount
+                END,
+                COUNT(*)
             FROM sap_sf_audit_Groups
             WHERE auditRunID_ID = ?
-            GROUP BY bucket
-        `, [uuidv4(), auditRunID, auditRunID]);
+            GROUP BY 
+                CASE 
+                    WHEN totalMemberCount <= 5 THEN '1–5 members'
+                    WHEN totalMemberCount <= 20 THEN '6–20 members'
+                    WHEN totalMemberCount <= 50 THEN '21–50 members'
+                    WHEN totalMemberCount <= 100 THEN '51–100 members'
+                    ELSE '100+ members'
+                END
+        `, [auditRunID, auditRunID]);
         
-        auditLogger.info('Group size distribution populated');
+        // Verify data was inserted
+        const result = await tx.run(`SELECT COUNT(*) as cnt FROM sap_sf_audit_GroupSizeDistribution WHERE auditRunID_ID = ?`, [auditRunID]);
+        auditLogger.info({ insertedCount: result[0]?.CNT }, 'Group size distribution populated');
+        
     } catch (error) {
-        auditLogger.error({ error: error.message }, 'Failed to populate group size distribution');
+        auditLogger.error({ error: error.message, stack: error.stack }, 'Failed to populate group size distribution');
+        throw error;  // Don't swallow the error
     }
 }
 
@@ -866,39 +899,106 @@ async function _populateStaticVsDynamicGroups(tx, auditRunID, auditLogger) {
     // ============================
     // ===== SERVICE HANDLERS =====
     // ============================
-
+// DEBUG: Test connection and user count
+this.on('debugConnection', async (req) => {
+    console.log('=== DEBUG: debugConnection called ===');
+    const { instance } = req.data;
+    
+    try {
+        console.log('Instance:', instance);
+        
+        // Test if _getSFDestination works
+        const sfConfig = await _getSFDestination(instance, logger, req);
+        console.log('Destination resolved:', sfConfig.baseURL);
+        
+        // Test API connectivity
+        const testUrl = `${sfConfig.baseURL}/User?$format=json&$top=1`;
+        const testResponse = await axios.get(testUrl, {
+            auth: sfConfig.auth,
+            headers: sfConfig.headers,
+            httpsAgent: sfConfig.httpsAgent,
+            timeout: 30000
+        });
+        console.log('API response status:', testResponse.status);
+        
+        // Get user count
+        const countUrl = `${sfConfig.baseURL}/User?$format=json&$top=1&$inlinecount=allpages`;
+        const countResponse = await axios.get(countUrl, {
+            auth: sfConfig.auth,
+            headers: sfConfig.headers,
+            httpsAgent: sfConfig.httpsAgent,
+            timeout: 30000
+        });
+        const totalUsers = countResponse.data?.d?.__count || 'Unknown';
+        
+        // Check database
+        const tx = cds.transaction(req);
+        const dbUserCount = await tx.run(
+            SELECT.one.from('Users').where({ instance: instance }).columns('count(*) as count')
+        );
+        const existingDbUsers = Number(dbUserCount[0]?.count || 0);
+        
+        return {
+            success: true,
+            sfUrl: sfConfig.baseURL,
+            sfTotalUsers: totalUsers,
+            dbExistingUsers: existingDbUsers,
+            apiWorking: true
+        };
+        
+    } catch (error) {
+        console.error('Debug error:', error.message);
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+});
     // Get Available Instances (Value Help for UI)
-    this.on('getAvailableInstances', async (req) => {
-        try {
-            logger.info('Fetching destinations from destination service');
-
-            const jwt = getJwt(req);
-            const destinations = await getAllDestinationsFromDestinationService({ jwt });
-
-            const sfInstances = [];
-
-            for (const dest of destinations) {
-                // Check for lowercase 'sfaudit' property
-                const hasSFAudit = dest.originalProperties?.sfaudit === true ||
-                    dest.originalProperties?.sfaudit === 'true';
-
-                if (hasSFAudit) {
-                    sfInstances.push({
-                        name: dest.name,
-                        url: dest.url
-                    });
-                    logger.info({ name: dest.name, url: dest.url }, 'Found SF audit instance');
-                }
+  this.on('getAvailableInstances', async (req) => {
+    // Check if running locally
+    const isLocal = !process.env.VCAP_APPLICATION;
+    
+    // LOCAL DEVELOPMENT: Return hardcoded instance
+    if (isLocal) {
+        logger.info('LOCAL MODE: Returning hardcoded instance');
+        return [
+            {
+                name: 'successfactors',
+                url: 'https://api68sales.successfactors.com/odata/v2'
             }
+        ];
+    }
+    
+    // CLOUD MODE: Use destination service
+    try {
+        logger.info('CLOUD MODE: Fetching destinations from destination service');
+        const jwt = getJwt(req);
+        const destinations = await getAllDestinationsFromDestinationService({ jwt });
 
-            logger.info({ count: sfInstances.length }, 'Filtered SF instances');
-            return sfInstances;
+        const sfInstances = [];
 
-        } catch (error) {
-            logger.error({ error: error.message }, 'Failed to get SF instances');
-            return [];
+        for (const dest of destinations) {
+            const hasSFAudit = dest.originalProperties?.sfaudit === 'true' ||
+                dest.originalProperties?.sfaudit === true;
+
+            if (hasSFAudit) {
+                sfInstances.push({
+                    name: dest.name,
+                    url: dest.url
+                });
+                logger.info({ name: dest.name, url: dest.url }, 'Found SF audit instance');
+            }
         }
-    });
+
+        logger.info({ count: sfInstances.length }, 'Filtered SF instances');
+        return sfInstances;
+
+    } catch (error) {
+        logger.error({ error: error.message }, 'Failed to get SF instances');
+        return [];
+    }
+});
 
     // USER SYNC ACTION
     this.on('syncUsers', async (req) => {
@@ -972,6 +1072,8 @@ async function _populateStaticVsDynamicGroups(tx, auditRunID, auditLogger) {
         }
     });
 
+    
+
     this.on('syncUsersIncremental', async (req) => {
         const { instance, lastSyncDate } = req.data;
         const syncLogger = logger.child({ operation: 'SYNC_USERS_INCREMENTAL', instance });
@@ -1043,9 +1145,8 @@ async function _populateStaticVsDynamicGroups(tx, auditRunID, auditLogger) {
                 });
             }
 
-            const countQuery = query.clone();
-            const countResult = await db.run(countQuery.SELECT('count(*) as total'));
-            const total = countResult[0]?.total || 0;
+           const countResult = await db.run(`SELECT COUNT(*) as total FROM sap_sf_audit_Users`);
+const total = countResult[0]?.total || 0;
 
             const users = await db.run(
                 query
@@ -1459,41 +1560,56 @@ async function _populateStaticVsDynamicGroups(tx, auditRunID, auditLogger) {
     //Delete Cascading
     this.on('deleteAuditRun', async (req) => {
     const { auditRunID } = req.data;
-    const tx = cds.tx();
+    const tx = cds.transaction(req);
     
     try {
-        await tx.begin();
+        console.log('=== DELETE AUDIT RUN ===');
+        console.log('auditRunID:', auditRunID);
+        
+        // First, check if audit run exists
+        const auditRun = await tx.run(
+            SELECT.one.from('AuditRuns').where({ ID: auditRunID })
+        );
+        
+        if (!auditRun) {
+            req.error(404, `Audit run ${auditRunID} not found`);
+            return { success: false, message: 'Audit run not found' };
+        }
+        
+        console.log('Found audit run:', auditRun.name);
         
         // Delete in correct order (child tables first)
-        const deleteOrder = [
-            'UserRoleMappings',
-            'RoleTargetPopulations',
-            'GroupMembers',
-            'MultiGroupUsers',
-            'InactiveUserAccess',
-            'GroupSizeDistribution',
-            'StaticVsDynamicGroups',
-            'UserGroupCountDistribution',
-            'UnusedRoles',
-            'ExecutiveSummary',
-            'Groups',
-            'Roles',
-            'AuditRuns'
-        ];
+        // Note: Use auditRunID_ID for child tables, but ID for AuditRuns itself
         
-        for (const entity of deleteOrder) {
-            await tx.run(DELETE.from(entity).where({ auditRunID_ID: auditRunID }));
-        }
+        await tx.run(`DELETE FROM sap_sf_audit_UserRoleMappings WHERE auditRunID_ID = ?`, [auditRunID]);
+        await tx.run(`DELETE FROM sap_sf_audit_RoleTargetPopulations WHERE auditRunID_ID = ?`, [auditRunID]);
+        await tx.run(`DELETE FROM sap_sf_audit_GroupMembers WHERE auditRunID_ID = ?`, [auditRunID]);
+        await tx.run(`DELETE FROM sap_sf_audit_MultiGroupUsers WHERE auditRunID_ID = ?`, [auditRunID]);
+        await tx.run(`DELETE FROM sap_sf_audit_InactiveUserAccess WHERE auditRunID_ID = ?`, [auditRunID]);
+        await tx.run(`DELETE FROM sap_sf_audit_GroupSizeDistribution WHERE auditRunID_ID = ?`, [auditRunID]);
+        await tx.run(`DELETE FROM sap_sf_audit_StaticVsDynamicGroups WHERE auditRunID_ID = ?`, [auditRunID]);
+        await tx.run(`DELETE FROM sap_sf_audit_UserGroupCountDistribution WHERE auditRunID_ID = ?`, [auditRunID]);
+        await tx.run(`DELETE FROM sap_sf_audit_UnusedRoles WHERE auditRunID_ID = ?`, [auditRunID]);
+        await tx.run(`DELETE FROM sap_sf_audit_ExecutiveSummary WHERE auditRunID_ID = ?`, [auditRunID]);
+        await tx.run(`DELETE FROM sap_sf_audit_Groups WHERE auditRunID_ID = ?`, [auditRunID]);
+        await tx.run(`DELETE FROM sap_sf_audit_Roles WHERE auditRunID_ID = ?`, [auditRunID]);
+        
+        // Finally delete the AuditRun itself (using ID, not auditRunID_ID)
+        await tx.run(`DELETE FROM sap_sf_audit_AuditRuns WHERE ID = ?`, [auditRunID]);
         
         await tx.commit();
         
+        console.log('Delete successful');
         return { success: true, message: `Audit run ${auditRunID} deleted successfully` };
         
     } catch (error) {
+        console.error('Delete error:', error.message);
         await tx.rollback();
         req.error(500, `Delete failed: ${error.message}`);
         return { success: false, message: error.message };
     }
 });
+
+
 
 });

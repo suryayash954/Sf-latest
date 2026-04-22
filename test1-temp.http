@@ -1,0 +1,389 @@
+### ============================================
+### SUCCESSFACTORS PERMISSION AUDIT - LOCAL TESTS
+### Base URL: http://localhost:4004
+### Database: SQLite (no auth required for local)
+### ============================================
+
+@baseUrl = http://localhost:4004
+
+### ============================================
+### 1. INSTANCE MANAGEMENT
+### ============================================
+
+### Get available SuccessFactors instances
+GET {{baseUrl}}/SuccessFactorRBPAudit/getAvailableInstances()
+Content-Type: application/json
+
+### ============================================
+### 2. USER MANAGEMENT
+### ============================================
+
+### Sync users from SuccessFactors (First time - fetches all users)
+POST {{baseUrl}}/SuccessFactorRBPAudit/syncUsers
+Content-Type: application/json
+
+{
+    "instance": "successfactors"
+}
+
+### Sync users again (Should return "already synced")
+POST {{baseUrl}}/SuccessFactorRBPAudit/syncUsers
+Content-Type: application/json
+
+{
+    "instance": "successfactors"
+}
+
+### Incremental sync (only users modified after date)
+POST {{baseUrl}}/SuccessFactorRBPAudit/syncUsersIncremental
+Content-Type: application/json
+
+{
+    "instance": "successfactors",
+    "lastSyncDate": "2026-01-01T00:00:00.000Z"
+}
+
+### Get users (paginated)
+POST {{baseUrl}}/SuccessFactorRBPAudit/getUsers
+Content-Type: application/json
+
+{
+    "top": 10,
+    "skip": 0
+}
+
+### Get users filtered by instance
+POST {{baseUrl}}/SuccessFactorRBPAudit/getUsers
+Content-Type: application/json
+
+{
+    "top": 10,
+    "skip": 0,
+    "instance": "successfactors",
+    "status": "active"
+}
+
+### Direct OData - Get Users
+GET {{baseUrl}}/SuccessFactorRBPAudit/Users?$top=5&$filter=instance eq 'successfactors'
+Content-Type: application/json
+
+### ============================================
+### 3. AUDIT RUN MANAGEMENT
+### ============================================
+
+### Create SAMPLE Audit Run (Groups only - no roles)
+POST {{baseUrl}}/SuccessFactorRBPAudit/AuditRuns
+Content-Type: application/json
+
+{
+    "name": "Local Sample Audit - Groups Only",
+    "description": "Testing audit locally with SQLite",
+    "mode": "SAMPLE",
+    "instance": "successfactors",
+    "extractGroups": true,
+    "extractRoles": false,
+    "sampleGroupSize": 3,
+    "sampleMemberSize": 5,
+    "sampleRoleSize": 0
+}
+
+### Create FULL Audit Run (Groups only - no roles)
+POST {{baseUrl}}/SuccessFactorRBPAudit/AuditRuns
+Content-Type: application/json
+
+{
+    "name": "Local Full Audit - Groups Only",
+    "description": "Complete groups audit locally",
+    "mode": "FULL",
+    "instance": "successfactors",
+    "extractGroups": true,
+    "extractRoles": false,
+    "sampleGroupSize": 0,
+    "sampleMemberSize": 0,
+    "sampleRoleSize": 0
+}
+
+### Create SAMPLE Audit Run (With Roles - may fail if no role access)
+POST {{baseUrl}}/SuccessFactorRBPAudit/AuditRuns
+Content-Type: application/json
+
+{
+    "name": "Local Sample Audit - With Roles",
+    "description": "Testing roles (may fail if no permission)",
+    "mode": "SAMPLE",
+    "instance": "successfactors",
+    "extractGroups": true,
+    "extractRoles": true,
+    "sampleGroupSize": 2,
+    "sampleMemberSize": 5,
+    "sampleRoleSize": 2
+}
+
+### Get Audit Status (Replace YOUR_AUDIT_RUN_ID)
+GET {{baseUrl}}/SuccessFactorRBPAudit/getAuditStatus(auditRunID=YOUR_AUDIT_RUN_ID)
+Content-Type: application/json
+
+### List all Audit Runs
+POST {{baseUrl}}/SuccessFactorRBPAudit/listAuditRuns
+Content-Type: application/json
+
+{
+    "top": 20,
+    "skip": 0
+}
+
+### List Audit Runs filtered by instance
+POST {{baseUrl}}/SuccessFactorRBPAudit/listAuditRuns
+Content-Type: application/json
+
+{
+    "status": "COMPLETED",
+    "instance": "successfactors",
+    "top": 10,
+    "skip": 0
+}
+
+### Direct OData - Get Audit Runs
+GET {{baseUrl}}/SuccessFactorRBPAudit/AuditRuns?$top=5&$orderby=createdAt desc
+Content-Type: application/json
+
+### ============================================
+### 4. DATA VERIFICATION (After Audit Run)
+### ============================================
+
+### Get Groups for audit run (Replace ID)
+GET {{baseUrl}}/SuccessFactorRBPAudit/Groups?$filter=auditRunID_ID eq 'e9df2922-fcca-4a92-a169-550b81229fd1'&$top=10
+Content-Type: application/json
+
+### Get Group Members
+GET {{baseUrl}}/SuccessFactorRBPAudit/GroupMembers?$filter=auditRunID_ID eq 'YOUR_AUDIT_RUN_ID'&$top=20
+Content-Type: application/json
+
+### Get Roles for audit run (if extracted)
+GET {{baseUrl}}/SuccessFactorRBPAudit/Roles?$filter=auditRunID_ID eq 'YOUR_AUDIT_RUN_ID'&$top=10
+Content-Type: application/json
+
+### Get Role Target Populations
+GET {{baseUrl}}/SuccessFactorRBPAudit/RoleTargetPopulations?$filter=auditRunID_ID eq 'YOUR_AUDIT_RUN_ID'&$top=10
+Content-Type: application/json
+
+### Get User Role Mappings
+GET {{baseUrl}}/SuccessFactorRBPAudit/UserRoleMappings?$filter=auditRunID_ID eq 'YOUR_AUDIT_RUN_ID'&$top=20
+Content-Type: application/json
+
+### Get Multi-Group Users (Risk Analysis)
+GET {{baseUrl}}/SuccessFactorRBPAudit/MultiGroupUsers?$filter=auditRunID_ID eq 'YOUR_AUDIT_RUN_ID'&$top=10
+Content-Type: application/json
+
+### Get Inactive Users with Access
+GET {{baseUrl}}/SuccessFactorRBPAudit/InactiveUserAccess?$filter=auditRunID_ID eq 'YOUR_AUDIT_RUN_ID'&$top=10
+Content-Type: application/json
+
+### Get Group Size Distribution
+GET {{baseUrl}}/SuccessFactorRBPAudit/GroupSizeDistribution?$filter=auditRunID_ID eq 'YOUR_AUDIT_RUN_ID'
+Content-Type: application/json
+
+### Get Static vs Dynamic Groups
+GET {{baseUrl}}/SuccessFactorRBPAudit/StaticVsDynamicGroups?$filter=auditRunID_ID eq 'YOUR_AUDIT_RUN_ID'
+Content-Type: application/json
+
+### Get User Group Count Distribution
+GET {{baseUrl}}/SuccessFactorRBPAudit/UserGroupCountDistribution?$filter=auditRunID_ID eq 'YOUR_AUDIT_RUN_ID'
+Content-Type: application/json
+
+### Get Unused Roles
+GET {{baseUrl}}/SuccessFactorRBPAudit/UnusedRoles?$filter=auditRunID_ID eq 'YOUR_AUDIT_RUN_ID'
+Content-Type: application/json
+
+### Get Executive Summary
+GET {{baseUrl}}/SuccessFactorRBPAudit/ExecutiveSummary?$filter=auditRunID_ID eq 'YOUR_AUDIT_RUN_ID'
+Content-Type: application/json
+
+### ============================================
+### 5. REPORTING SERVICE TESTS
+### ============================================
+
+### Get Risk Dashboard
+POST {{baseUrl}}/SuccessFactorRBPReport/getRiskDashboard
+Content-Type: application/json
+
+{
+    "auditRunID": "YOUR_AUDIT_RUN_ID"
+}
+
+### Get Executive Summary
+POST {{baseUrl}}/SuccessFactorRBPReport/getExecutiveSummary
+Content-Type: application/json
+
+{
+    "auditRunID": "YOUR_AUDIT_RUN_ID"
+}
+
+### Get Group Details
+POST {{baseUrl}}/SuccessFactorRBPReport/getGroupDetails
+Content-Type: application/json
+
+{
+    "auditRunID": "YOUR_AUDIT_RUN_ID",
+    "top": 20,
+    "skip": 0
+}
+
+### Get Group Size Analysis
+POST {{baseUrl}}/SuccessFactorRBPReport/getGroupSizeAnalysis
+Content-Type: application/json
+
+{
+    "auditRunID": "YOUR_AUDIT_RUN_ID"
+}
+
+### Get User Access Analysis
+POST {{baseUrl}}/SuccessFactorRBPReport/getUserAccessAnalysis
+Content-Type: application/json
+
+{
+    "auditRunID": "YOUR_AUDIT_RUN_ID",
+    "top": 20
+}
+
+### Get User Details
+POST {{baseUrl}}/SuccessFactorRBPReport/getUserDetails
+Content-Type: application/json
+
+{
+    "auditRunID": "YOUR_AUDIT_RUN_ID",
+    "status": "active",
+    "minGroupCount": 0,
+    "top": 20,
+    "skip": 0
+}
+
+### Get High Risk Users
+POST {{baseUrl}}/SuccessFactorRBPReport/getHighRiskUsers
+Content-Type: application/json
+
+{
+    "auditRunID": "YOUR_AUDIT_RUN_ID",
+    "minRiskScore": 5,
+    "top": 20,
+    "skip": 0
+}
+
+### Get Inactive Users With Access
+POST {{baseUrl}}/SuccessFactorRBPReport/getInactiveUsersWithAccess
+Content-Type: application/json
+
+{
+    "auditRunID": "YOUR_AUDIT_RUN_ID",
+    "top": 20,
+    "skip": 0
+}
+
+### Get Role Details
+POST {{baseUrl}}/SuccessFactorRBPReport/getRoleDetails
+Content-Type: application/json
+
+{
+    "auditRunID": "YOUR_AUDIT_RUN_ID",
+    "top": 20,
+    "skip": 0
+}
+
+### Get Role Coverage Analysis
+POST {{baseUrl}}/SuccessFactorRBPReport/getRoleCoverageAnalysis
+Content-Type: application/json
+
+{
+    "auditRunID": "YOUR_AUDIT_RUN_ID"
+}
+
+### Get Group Role Matrix
+POST {{baseUrl}}/SuccessFactorRBPReport/getGroupRoleMatrix
+Content-Type: application/json
+
+{
+    "auditRunID": "YOUR_AUDIT_RUN_ID",
+    "top": 50,
+    "skip": 0
+}
+
+### Get User Role Matrix
+POST {{baseUrl}}/SuccessFactorRBPReport/getUserRoleMatrix
+Content-Type: application/json
+
+{
+    "auditRunID": "YOUR_AUDIT_RUN_ID",
+    "top": 50,
+    "skip": 0
+}
+
+### ============================================
+### 6. DELETE AUDIT RUN (Cleanup)
+### ============================================
+
+### Delete audit run and all related data
+POST {{baseUrl}}/SuccessFactorRBPAudit/deleteAuditRun
+Content-Type: application/json
+
+{
+    "auditRunID": "YOUR_AUDIT_RUN_ID"
+}
+
+### ============================================
+### 7. COMPLETE WORKFLOW TEST
+### ============================================
+
+### Step 1: Get available instances
+GET {{baseUrl}}/SuccessFactorRBPAudit/getAvailableInstances()
+Content-Type: application/json
+
+### Step 2: Sync users
+POST {{baseUrl}}/SuccessFactorRBPAudit/syncUsers
+Content-Type: application/json
+
+{
+    "instance": "successfactors"
+}
+
+### Step 3: Create audit run (SAVE THE ID FROM RESPONSE)
+POST {{baseUrl}}/SuccessFactorRBPAudit/AuditRuns
+Content-Type: application/json
+
+{
+    "name": "Workflow Test Local",
+    "mode": "SAMPLE",
+    "instance": "successfactors",
+    "extractGroups": true,
+    "extractRoles": false,
+    "sampleGroupSize": 3,
+    "sampleMemberSize": 5,
+    "sampleRoleSize": 0
+}
+
+### Step 4: Check status (replace ID)
+GET {{baseUrl}}/SuccessFactorRBPAudit/getAuditStatus(auditRunID=YOUR_ID)
+Content-Type: application/json
+
+### Step 5: Wait 30 seconds, then check status again
+GET {{baseUrl}}/SuccessFactorRBPAudit/getAuditStatus(auditRunID=YOUR_ID)
+Content-Type: application/json
+
+### Step 6: View results
+GET {{baseUrl}}/SuccessFactorRBPAudit/Groups?$filter=auditRunID_ID eq 'YOUR_ID'&$top=10
+Content-Type: application/json
+
+### Step 7: Get Risk Dashboard
+POST {{baseUrl}}/SuccessFactorRBPReport/getRiskDashboard
+Content-Type: application/json
+
+{
+    "auditRunID": "YOUR_ID"
+}
+
+### Step 8: Delete audit run (cleanup)
+POST {{baseUrl}}/SuccessFactorRBPAudit/deleteAuditRun
+Content-Type: application/json
+
+{
+    "auditRunID": "YOUR_ID"
+}

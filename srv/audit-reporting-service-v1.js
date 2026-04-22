@@ -152,18 +152,18 @@ module.exports = cds.service.impl(async function () {
         };
     }
 
-    async function _getTotals(tx, auditRunID) {
-    const [groups, users, roles] = await Promise.all([
+async function _getTotals(tx, auditRunID) {
+    const [groups, members, roles] = await Promise.all([
         tx.run(SELECT.from('Groups').where({ auditRunID_ID: auditRunID }).columns('count(*) as count')),
-        tx.run(SELECT.from('Users').where({ auditRunID_ID: auditRunID }).columns('count(*) as count')),
+        tx.run(SELECT.from('GroupMembers').where({ auditRunID_ID: auditRunID }).columns('count(distinct userId) as count')),
         tx.run(SELECT.from('Roles').where({ auditRunID_ID: auditRunID }).columns('count(*) as count'))
     ]);
-
     return {
-        // Extract the 'count' alias from the first object in each result array
         totalGroups: Number(groups[0]?.count || 0),
-        totalUsers: Number(users[0]?.count || 0),
-        totalRoles: Number(roles[0]?.count || 0)
+        totalUsers: Number(members[0]?.count || 0),  // Get unique users from GroupMembers
+        totalRoles: Number(roles[0]?.count || 0),
+        totalGroupMembers: 0,
+        totalRoleAssignments: 0
     };
 }
 

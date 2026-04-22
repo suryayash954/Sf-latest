@@ -26,42 +26,70 @@ module.exports = cds.service.impl(async function () {
     // ============================
     // RISK DASHBOARD
     // ============================
-    async function getRiskDashboard(req) {
-        // console.log("req",req);
-        const { auditRunID } = req.data;
-        const tx = cds.transaction(req);
+async function getRiskDashboard(req) {
+    const { auditRunID } = req.data;
+    const tx = cds.transaction(req);
 
-        try {
+    try {
+        const auditRun = await tx.run(
+            SELECT.one.from('AuditRuns').where({ ID: auditRunID })
+        );
 
-            const auditRun = await tx.run(
-                SELECT.one.from('AuditRuns').where({ ID: auditRunID })
-            );
-
-            if (!auditRun) {
-                req.error(404, `Audit run ${auditRunID} not found`);
-            }
-
-            const [riskMetrics, totals] = await Promise.all([
-                _getRiskMetrics(tx, auditRunID),
-                _getTotals(tx, auditRunID)
-            ]);
-
-            return {
-                auditInfo: {
-                    name: auditRun.name,
-                    instance: auditRun.instance,
-                    status: auditRun.status,
-                    mode: auditRun.mode,
-                    generatedAt: auditRun.endTime || auditRun.startTime
-                },
-                riskMetrics,
-                totals
-            };
-
-        } catch (error) {
-            req.error(500, error.message);
+        if (!auditRun) {
+            req.error(404, `Audit run ${auditRunID} not found`);
+            return;
         }
+
+        const groups = await tx.run(
+            SELECT.from('Groups').where({ auditRunID_ID: auditRunID })
+        );
+        
+        const members = await tx.run(
+            SELECT.from('GroupMembers').where({ auditRunID_ID: auditRunID })
+        );
+        const uniqueUsers = new Set(members.map(m => m.userId)).size;
+        
+        const roles = await tx.run(
+            SELECT.from('Roles').where({ auditRunID_ID: auditRunID })
+        );
+
+        const multiGroup = await tx.run(
+            SELECT.from('MultiGroupUsers').where({ auditRunID_ID: auditRunID })
+        );
+        
+        const highRisk = multiGroup.filter(u => u.riskLevel === 'High').length;
+        const mediumRisk = multiGroup.filter(u => u.riskLevel === 'Medium').length;
+        const lowRisk = multiGroup.filter(u => u.riskLevel === 'Low').length;
+
+        return {
+            auditInfo: {
+                name: auditRun.name,
+                instance: auditRun.instance || 'QAS',
+                generatedAt: auditRun.endTime || auditRun.startTime,
+                status: auditRun.status,
+                mode: auditRun.mode
+            },
+            riskMetrics: {
+                highRiskUsers: highRisk,
+                mediumRiskUsers: mediumRisk,
+                lowRiskUsers: lowRisk,
+                inactiveUsersWithAccess: 0,
+                unusedRolesCount: 0,
+                largeGroupsCount: 0
+            },
+            totals: {
+                totalGroups: groups.length,
+                totalUsers: uniqueUsers,
+                totalRoles: roles.length,
+                totalGroupMembers: members.length,
+                totalRoleAssignments: 0
+            }
+        };
+
+    } catch (error) {
+        req.error(500, error.message);
     }
+}
 
     // ============================
     // GROUP DETAILS (OPTIMIZED)
@@ -289,79 +317,79 @@ async function exportAuditData(req) {
     // ============================
     // EXECUTIVE SUMMARY
     // ============================
-    async function getExecutiveSummary(req) {
-        const { auditRunID } = req.data;
-        const tx = cds.transaction(req);
+  async function getExecutiveSummary(req) {
+    const { auditRunID } = req.data;
+    const tx = cds.transaction(req);
 
-        try {
-            const auditRun = await tx.run(
-                SELECT.one.from('AuditRuns').where({ ID: auditRunID })
-            );
+    try {
+        const auditRun = await tx.run(
+            SELECT.one.from('AuditRuns').where({ ID: auditRunID })
+        );
 
-            if (!auditRun) {
-                req.error(404, `Audit run ${auditRunID} not found`);
-                return;
-            }
-
-            const groups = await tx.run(
-                SELECT.from('Groups').where({ auditRunID_ID: auditRunID })
-            );
-            
-            const staticGroups = groups.filter(g => g.groupType === 'STATIC').length;
-            const dynamicGroups = groups.filter(g => g.groupType === 'DYNAMIC').length;
-            
-            const members = await tx.run(
-                SELECT.from('GroupMembers').where({ auditRunID_ID: auditRunID })
-            );
-            const uniqueUsers = new Set(members.map(m => m.userId)).size;
-            
-            const multiGroup = await tx.run(
-                SELECT.from('MultiGroupUsers').where({ auditRunID_ID: auditRunID })
-            );
-            const highRiskCount = multiGroup.filter(u => u.riskLevel === 'High').length;
-            
-            const largeGroups = groups.filter(g => (g.totalMemberCount || 0) >= 51).length;
-            
-            const roles = await tx.run(
-                SELECT.from('Roles').where({ auditRunID_ID: auditRunID })
-            );
-
-            return {
-                auditInfo: {
-                    name: auditRun.name,
-                    instance: auditRun.instance || 'QAS',
-                    generatedAt: auditRun.endTime || auditRun.startTime,
-                    mode: auditRun.mode,
-                    status: auditRun.status
-                },
-                metrics: {
-                    totalGroups: groups.length,
-                    staticGroups: staticGroups,
-                    dynamicGroups: dynamicGroups,
-                    totalUsers: uniqueUsers,
-                    highAccessUsers: highRiskCount,
-                    largeGroups: largeGroups,
-                    totalRoles: roles.length,
-                    unusedRoles: 0
-                },
-                riskIndicators: {
-                    highAccessUsersCount: highRiskCount,
-                    largeGroupsCount: largeGroups,
-                    inactiveUsersWithAccess: 0,
-                    unusedRolesCount: 0
-                },
-                recommendations: highRiskCount > 0 ? [{
-                    category: 'Security Risk',
-                    priority: 'High',
-                    description: `Found ${highRiskCount} users with high-risk access levels`,
-                    affectedCount: highRiskCount
-                }] : []
-            };
-
-        } catch (error) {
-            req.error(500, error.message);
+        if (!auditRun) {
+            req.error(404, `Audit run ${auditRunID} not found`);
+            return;
         }
+
+        const groups = await tx.run(
+            SELECT.from('Groups').where({ auditRunID_ID: auditRunID })
+        );
+        
+        const staticGroups = groups.filter(g => g.groupType === 'STATIC').length;
+        const dynamicGroups = groups.filter(g => g.groupType === 'DYNAMIC').length;
+        
+        const members = await tx.run(
+            SELECT.from('GroupMembers').where({ auditRunID_ID: auditRunID })
+        );
+        const uniqueUsers = new Set(members.map(m => m.userId)).size;
+        
+        const multiGroup = await tx.run(
+            SELECT.from('MultiGroupUsers').where({ auditRunID_ID: auditRunID })
+        );
+        const highRiskCount = multiGroup.filter(u => u.riskLevel === 'High').length;
+        
+        const largeGroups = groups.filter(g => (g.totalMemberCount || 0) >= 51).length;
+        
+        const roles = await tx.run(
+            SELECT.from('Roles').where({ auditRunID_ID: auditRunID })
+        );
+
+        return {
+            auditInfo: {
+                name: auditRun.name,
+                instance: auditRun.instance || 'QAS',
+                generatedAt: auditRun.endTime || auditRun.startTime,
+                mode: auditRun.mode,
+                status: auditRun.status
+            },
+            metrics: {
+                totalGroups: groups.length,
+                staticGroups: staticGroups,
+                dynamicGroups: dynamicGroups,
+                totalUsers: uniqueUsers,
+                highAccessUsers: highRiskCount,
+                largeGroups: largeGroups,
+                totalRoles: roles.length,
+                unusedRoles: 0
+            },
+            riskIndicators: {
+                highAccessUsersCount: highRiskCount,
+                largeGroupsCount: largeGroups,
+                inactiveUsersWithAccess: 0,
+                unusedRolesCount: 0
+            },
+            recommendations: highRiskCount > 0 ? [{
+                category: 'Security Risk',
+                priority: 'High',
+                description: `Found ${highRiskCount} users with high-risk access levels`,
+                affectedCount: highRiskCount
+            }] : []
+        };
+
+    } catch (error) {
+        req.error(500, error.message);
     }
+}
 
     // ============================
     // GROUP SIZE ANALYSIS
@@ -957,20 +985,20 @@ async function exportAuditData(req) {
         };
     }
 
-    async function _getTotals(tx, auditRunID) {
-        const [groups, users, roles] = await Promise.all([
-            tx.run(SELECT.from('Groups').where({ auditRunID_ID: auditRunID }).columns('count(*) as count')),
-            tx.run(SELECT.from('Users').where({ auditRunID_ID: auditRunID }).columns('count(*) as count')),
-            tx.run(SELECT.from('Roles').where({ auditRunID_ID: auditRunID }).columns('count(*) as count'))
-        ]);
+async function _getTotals(tx, auditRunID) {
+    const [groups, members, roles] = await Promise.all([
+        tx.run(SELECT.from('Groups').where({ auditRunID_ID: auditRunID }).columns('count(*) as count')),
+        tx.run(SELECT.from('GroupMembers').where({ auditRunID_ID: auditRunID }).columns('count(distinct userId) as count')),
+        tx.run(SELECT.from('Roles').where({ auditRunID_ID: auditRunID }).columns('count(*) as count'))
+    ]);
 
-        return {
-            totalGroups: Number(groups[0]?.count || 0),
-            totalUsers: Number(users[0]?.count || 0),
-            totalRoles: Number(roles[0]?.count || 0),
-            totalGroupMembers: 0,
-            totalRoleAssignments: 0
-        };
-    }
+    return {
+        totalGroups: Number(groups[0]?.count || 0),
+        totalUsers: Number(members[0]?.count || 0),  // Get unique users from GroupMembers
+        totalRoles: Number(roles[0]?.count || 0),
+        totalGroupMembers: 0,
+        totalRoleAssignments: 0
+    };
+}
 
 });

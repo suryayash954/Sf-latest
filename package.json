@@ -37,6 +37,14 @@
       "auth": "xsuaa",
       "connectivity": true,
       "destinations": true
+    },
+    "mocks": {
+      "services": {
+        "DebugService": {
+          "impl": "srv/debug-service.js",
+          "path": "/debug"
+        }
+      }
     }
   }
 }
