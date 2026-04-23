@@ -134,67 +134,107 @@ module.exports = cds.service.impl(async function () {
         return users;
     }
 
-    function _formatUsers(rawUsers, instance) {
-        return rawUsers.map(user => ({
-            userId: user.userId,
-            instance: instance,
-            userName: user.userName || user.username || '',
-            firstName: user.firstName || '',
-            lastName: user.lastName || '',
-            status: user.status === 'T' ? 'inactive' : 'active',
-            email: user.email || '',
-            hireDate: user.hireDate ? new Date(user.hireDate) : null,
-            terminationDate: user.companyExitDate ? new Date(user.companyExitDate) : null,
-            lastModifiedDateTime: user.lastModifiedDateTime ? new Date(parseInt(user.lastModifiedDateTime.replace(/\D/g, ''))) : new Date(),
-            jobTitle: user.jobTitle || '',
-            department: user.department || '',
-            lastSyncAt: new Date(),
-            isActive: user.status !== 'T'
-        }));
+  function _formatUsers(rawUsers, instance) {
+    console.log(`_formatUsers: Formatting ${rawUsers.length} users with instance:`, instance);
+    
+    const formatted = rawUsers.map(user => ({
+        userId: user.userId,
+        instance: instance,  // This should be set
+        userName: user.userName || user.username || '',
+        firstName: user.firstName || '',
+        lastName: user.lastName || '',
+        status: user.status === 'T' ? 'inactive' : 'active',
+        email: user.email || '',
+        hireDate: user.hireDate ? new Date(user.hireDate) : null,
+        terminationDate: user.companyExitDate ? new Date(user.companyExitDate) : null,
+        lastModifiedDateTime: user.lastModifiedDateTime ? new Date(parseInt(user.lastModifiedDateTime.replace(/\D/g, ''))) : new Date(),
+        jobTitle: user.jobTitle || '',
+        department: user.department || '',
+        lastSyncAt: new Date(),
+        isActive: user.status !== 'T'
+    }));
+    
+    if (formatted.length > 0) {
+        console.log('First formatted user:', {
+            userId: formatted[0].userId,
+            instance: formatted[0].instance,
+            userName: formatted[0].userName
+        });
     }
+    
+    return formatted;
+}
 
-    async function _upsertUsers(tx, users, instance, auditLogger) {
-        let inserted = 0;
-        let updated = 0;
-
-        for (let i = 0; i < users.length; i += BATCH_CONFIG.USER_BATCH_SIZE) {
-            const batch = users.slice(i, i + BATCH_CONFIG.USER_BATCH_SIZE);
-            for (const user of batch) {
-                try {
-                    const existing = await tx.run(
-                        SELECT.one.from('Users').where({ userId: user.userId, instance: instance })
-                    );
-                    if (existing) {
-                        await tx.run(
-                            UPDATE('Users')
-                                .set({
-                                    userName: user.userName,
-                                    firstName: user.firstName,
-                                    lastName: user.lastName,
-                                    status: user.status,
-                                    email: user.email,
-                                    hireDate: user.hireDate,
-                                    terminationDate: user.terminationDate,
-                                    lastModifiedDateTime: user.lastModifiedDateTime,
-                                    jobTitle: user.jobTitle,
-                                    department: user.department,
-                                    lastSyncAt: new Date(),
-                                    isActive: user.isActive
-                                })
-                                .where({ userId: user.userId, instance: instance })
-                        );
-                        updated++;
-                    } else {
-                        await tx.run(INSERT.into('Users').entries(user));
-                        inserted++;
-                    }
-                } catch (error) {
-                    auditLogger.error({ userId: user.userId, error: error.message }, 'Failed to upsert user');
+   async function _upsertUsers(tx, users, instance, auditLogger) {
+    let inserted = 0;
+    let updated = 0;
+    
+    console.log(`_upsertUsers: Processing ${users.length} users for instance:`, instance);
+    
+    // Check existing users count before upsert
+    const existingBefore = await tx.run(`
+        SELECT COUNT(*) as cnt FROM sap_sf_audit_Users WHERE instance = ?
+    `, [instance]);
+    console.log(`Existing users for ${instance} before upsert:`, existingBefore[0]?.CNT);
+    
+    for (let i = 0; i < users.length; i += BATCH_CONFIG.USER_BATCH_SIZE) {
+        const batch = users.slice(i, i + BATCH_CONFIG.USER_BATCH_SIZE);
+        
+        for (const user of batch) {
+            try {
+                // Check if user exists with both userId AND instance
+                const existing = await tx.run(`
+                    SELECT * FROM sap_sf_audit_Users 
+                    WHERE userId = ? AND instance = ?
+                `, [user.userId, instance]);
+                
+                if (existing && existing.length > 0) {
+                    await tx.run(`
+                        UPDATE sap_sf_audit_Users 
+                        SET userName = ?, firstName = ?, lastName = ?, status = ?,
+                            email = ?, hireDate = ?, terminationDate = ?,
+                            lastModifiedDateTime = ?, jobTitle = ?, department = ?,
+                            lastSyncAt = ?, isActive = ?
+                        WHERE userId = ? AND instance = ?
+                    `, [
+                        user.userName, user.firstName, user.lastName, user.status,
+                        user.email, user.hireDate, user.terminationDate,
+                        user.lastModifiedDateTime, user.jobTitle, user.department,
+                        new Date(), user.isActive,
+                        user.userId, instance
+                    ]);
+                    updated++;
+                } else {
+                    await tx.run(`
+                        INSERT INTO sap_sf_audit_Users 
+                        (userId, instance, userName, firstName, lastName, status, email,
+                         hireDate, terminationDate, lastModifiedDateTime, jobTitle,
+                         department, lastSyncAt, isActive)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    `, [
+                        user.userId, user.instance, user.userName, user.firstName,
+                        user.lastName, user.status, user.email, user.hireDate,
+                        user.terminationDate, user.lastModifiedDateTime, user.jobTitle,
+                        user.department, new Date(), user.isActive
+                    ]);
+                    inserted++;
                 }
+            } catch (error) {
+                auditLogger.error({ userId: user.userId, error: error.message }, 'Failed to upsert user');
+                console.error(`Error upserting user ${user.userId}:`, error.message);
             }
         }
-        return { inserted, updated };
     }
+    
+    // Verify after upsert
+    const existingAfter = await tx.run(`
+        SELECT COUNT(*) as cnt FROM sap_sf_audit_Users WHERE instance = ?
+    `, [instance]);
+    console.log(`Existing users for ${instance} after upsert:`, existingAfter[0]?.CNT);
+    console.log(`Inserted: ${inserted}, Updated: ${updated}`);
+    
+    return { inserted, updated };
+}
 
     async function _fetchUsersModifiedAfter(sfConfig, lastSyncTimestamp, auditLogger) {
         const users = [];
@@ -400,56 +440,76 @@ module.exports = cds.service.impl(async function () {
         `, [auditRunID, auditRunID]);
     }
 
-    async function _fetchRolesWithPagination(sfConfig, auditLogger) {
-        const roles = [];
-        let skip = 0;
-        const top = 100;
-        let hasMore = true;
+  async function _fetchRolesWithPagination(sfConfig, auditLogger) {
+    const roles = [];
+    let skip = 0;
+    const top = 100;
+    let hasMore = true;
 
-        while (hasMore) {
-            try {
-                const url = `${sfConfig.baseURL}/RBPRole?$format=json&$top=${top}&$skip=${skip}`;
-                const response = await axios.get(url, {
-                    auth: sfConfig.auth,
-                    headers: sfConfig.headers,
-                    httpsAgent: sfConfig.httpsAgent,
-                    timeout: sfConfig.timeout
-                });
-                const results = response.data?.d?.results || [];
-                roles.push(...results);
-                hasMore = results.length === top;
-                skip += top;
-            } catch (error) {
-                auditLogger.error({ error: error.message, skip }, 'Failed to fetch roles batch');
-                throw error;
+    // Use RoleEntity instead of RBPRole
+    const entityName = 'RoleEntity';
+    
+    while (hasMore) {
+        try {
+            const url = `${sfConfig.baseURL}/${entityName}?$format=json&$top=${top}&$skip=${skip}`;
+            
+            const response = await axios.get(url, {
+                auth: sfConfig.auth,
+                headers: sfConfig.headers,
+                httpsAgent: sfConfig.httpsAgent,
+                timeout: sfConfig.timeout
+            });
+
+            const results = response.data?.d?.results || [];
+            roles.push(...results);
+            hasMore = results.length === top;
+            skip += top;
+            
+            auditLogger.info({ fetched: results.length, total: roles.length }, 'Roles batch fetched');
+
+        } catch (error) {
+            auditLogger.error({ error: error.message, skip, entityName }, 'Failed to fetch roles batch');
+            throw error;
+        }
+    }
+    
+    auditLogger.info({ totalRoles: roles.length }, 'All roles fetched');
+    return roles;
+}
+            async function _saveRoles(tx, auditRunID, roles, auditLogger) {
+                if (!roles.length) return;
+
+            const parseSFDate = (dateValue) => {
+                if (!dateValue) return null;
+                if (typeof dateValue === 'string') {
+                    const match = dateValue.match(/\/Date\((\d+)\)\//);
+                    if (match) return new Date(parseInt(match[1]));
+                }
+                return dateValue instanceof Date ? dateValue : null;
+            };
+
+            const entries = roles.map(r => ({
+                ID: uuidv4(),
+                auditRunID_ID: auditRunID,
+                
+                // Map RoleEntity fields to existing Roles entity fields
+                roleId: r.externalCode || r.roleId,                    // externalCode → roleId
+                roleName: r.name_en_US || r.name_defaultValue || r.roleName,  // name_en_US → roleName
+                roleDesc: r.description || '',                          // description → roleDesc (if available)
+                roleType: 'MDF',                                        // Mark as MDF role type
+                userType: 'user',                                       // Default user type
+                lastModifiedBy: r.lastModifiedBy || '',                 // lastModifiedBy → lastModifiedBy
+                lastModifiedDate: parseSFDate(r.lastModifiedDate)       // lastModifiedDate → lastModifiedDate
+            }));
+
+            const batchSize = 500;
+            for (let i = 0; i < entries.length; i += batchSize) {
+                const batch = entries.slice(i, i + batchSize);
+                await tx.run(INSERT.into('Roles').entries(batch));
             }
+            
+            auditLogger.info({ count: entries.length }, 'Roles saved from RoleEntity');
         }
-        return roles;
-    }
-
-    async function _saveRoles(tx, auditRunID, roles, auditLogger) {
-        if (!roles.length) return;
-
-        const entries = roles.map(r => ({
-            ID: uuidv4(),
-            auditRunID_ID: auditRunID,
-            roleId: r.roleId || r.id,
-            roleName: r.roleName || r.name,
-            roleDesc: r.roleDesc || r.description || '',
-            roleType: r.roleType || 'standard',
-            userType: r.userType || 'user',
-            lastModifiedBy: r.lastModifiedBy || '',
-            lastModifiedDate: r.lastModifiedDate ? new Date(r.lastModifiedDate) : new Date()
-        }));
-
-        const batchSize = 500;
-        for (let i = 0; i < entries.length; i += batchSize) {
-            const batch = entries.slice(i, i + batchSize);
-            await tx.run(INSERT.into('Roles').entries(batch));
-        }
-        auditLogger.info({ count: entries.length }, 'Roles saved');
-    }
-
     async function _generateAnalytics(tx, auditRunID, auditLogger) {
         try {
             await tx.run(`
@@ -490,177 +550,272 @@ module.exports = cds.service.impl(async function () {
         }
     }
 
-    async function _populateRoleTargetsAndUnusedRoles(tx, auditRunID, sfConfig, auditLogger) {
-        try {
-            auditLogger.info('Populating role target populations');
+   async function _populateRoleTargetsAndUnusedRoles(tx, auditRunID, sfConfig, auditLogger) {
+    try {
+        auditLogger.info('Populating role target populations');
 
-            await tx.run(DELETE.from('RoleTargetPopulations').where({ auditRunID_ID: auditRunID }));
-            await tx.run(DELETE.from('UnusedRoles').where({ auditRunID_ID: auditRunID }));
+        await tx.run(DELETE.from('RoleTargetPopulations').where({ auditRunID_ID: auditRunID }));
+        await tx.run(DELETE.from('UnusedRoles').where({ auditRunID_ID: auditRunID }));
 
-            const groups = await tx.run(
-                SELECT.from('Groups').where({ auditRunID_ID: auditRunID })
-            );
+        const groups = await tx.run(
+            SELECT.from('Groups').where({ auditRunID_ID: auditRunID })
+        );
 
-            if (!groups.length) {
-                auditLogger.warn('No groups found, skipping role targets');
-                return;
-            }
+        if (!groups.length) {
+            auditLogger.warn('No groups found, skipping role targets');
+            return;
+        }
 
-            for (const group of groups) {
-                try {
-                    const roleTargetEndpoints = [
-                        `${sfConfig.baseURL}/DynamicGroup('${group.groupID}')/roleTargets?$format=json`,
-                        `${sfConfig.baseURL}/RBPRule?$filter=groupId eq '${group.groupID}'&$format=json`,
-                        `${sfConfig.baseURL}/getRoleTargetsByGroup?groupId=${group.groupID}&$format=json`
-                    ];
+        // For each group, try to fetch role targets
+        for (const group of groups) {
+            try {
+                const roleTargetEndpoints = [
+                    `${sfConfig.baseURL}/DynamicGroup('${group.groupID}')/roleTargets?$format=json`,
+                    `${sfConfig.baseURL}/RBPRule?$filter=groupId eq '${group.groupID}'&$format=json`,
+                    `${sfConfig.baseURL}/getRoleTargetsByGroup?groupId=${group.groupID}&$format=json`
+                ];
 
-                    for (const url of roleTargetEndpoints) {
-                        try {
-                            const response = await axios.get(url, {
-                                auth: sfConfig.auth,
-                                headers: sfConfig.headers,
-                                httpsAgent: sfConfig.httpsAgent,
-                                timeout: 10000
-                            });
-                            const targets = response.data?.d?.results || [];
-                            if (targets.length > 0) {
-                                auditLogger.debug({ groupId: group.groupID, count: targets.length }, 'Found role targets');
-                                for (const target of targets) {
-                                    await tx.run(`
-                                        INSERT INTO sap_sf_audit_RoleTargetPopulations (
-                                            ID, auditRunID_ID, roleId, roleName, groupId, groupName,
-                                            source, ruleId, ruleMyFilter
-                                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    `, [
-                                        uuidv4(), auditRunID,
-                                        target.roleId || target.id,
-                                        target.roleName || target.name,
-                                        group.groupID, group.groupName,
-                                        'api_fetch',
-                                        target.ruleId || '',
-                                        target.ruleMyFilter || ''
-                                    ]);
-                                }
-                                break;
+                for (const url of roleTargetEndpoints) {
+                    try {
+                        const response = await axios.get(url, {
+                            auth: sfConfig.auth,
+                            headers: sfConfig.headers,
+                            httpsAgent: sfConfig.httpsAgent,
+                            timeout: 10000
+                        });
+
+                        const targets = response.data?.d?.results || [];
+                        if (targets.length > 0) {
+                            auditLogger.debug({ groupId: group.groupID, count: targets.length }, 'Found role targets');
+
+                            for (const target of targets) {
+                                await tx.run(`
+                                    INSERT INTO sap_sf_audit_RoleTargetPopulations (
+                                        ID, auditRunID_ID, roleId, roleName, groupId, groupName,
+                                        source, ruleId, ruleMyFilter
+                                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                `, [
+                                    uuidv4(), auditRunID,
+                                    target.roleId || target.id,
+                                    target.roleName || target.name,
+                                    group.groupID, group.groupName,
+                                    'api_fetch',
+                                    target.ruleId || '',
+                                    target.ruleMyFilter || ''
+                                ]);
                             }
-                        } catch (e) {
-                            auditLogger.debug({ groupId: group.groupID, url }, 'Endpoint failed');
+                            break;
                         }
-                    }
-                } catch (error) {
-                    auditLogger.debug({ groupId: group.groupID }, 'No role targets found for group');
-                }
-            }
-
-            const roles = await tx.run(
-                SELECT.from('Roles').where({ auditRunID_ID: auditRunID })
-            );
-
-            if (roles.length) {
-                const rolesWithTargets = await tx.run(
-                    SELECT.from('RoleTargetPopulations').where({ auditRunID_ID: auditRunID })
-                        .columns('distinct roleId')
-                );
-                const usedRoleIds = new Set(rolesWithTargets.map(r => r.roleId));
-                for (const role of roles) {
-                    if (!usedRoleIds.has(role.roleId)) {
-                        await tx.run(`
-                            INSERT INTO sap_sf_audit_UnusedRoles (
-                                ID, auditRunID_ID, roleId, roleName, roleType, recommendation
-                            ) VALUES (?, ?, ?, ?, ?, ?)
-                        `, [
-                            uuidv4(), auditRunID, role.roleId, role.roleName,
-                            role.roleType || 'standard', 'Review / Decommission'
-                        ]);
+                    } catch (e) {
+                        auditLogger.debug({ groupId: group.groupID, url }, 'Endpoint failed');
                     }
                 }
+            } catch (error) {
+                auditLogger.debug({ groupId: group.groupID }, 'No role targets found for group');
             }
-            auditLogger.info('Role targets and unused roles populated');
-        } catch (error) {
-            auditLogger.error({ error: error.message }, 'Failed to populate role targets');
         }
-    }
 
-    async function _populateUserRoleMappings(tx, auditRunID, auditLogger) {
-        try {
-            auditLogger.info('Populating user-role mappings');
-            await tx.run(DELETE.from('UserRoleMappings').where({ auditRunID_ID: auditRunID }));
-            await tx.run(`
-                INSERT INTO sap_sf_audit_UserRoleMappings 
-                (ID, auditRunID_ID, userId, userName, roleId, roleName, assignedViaGroup)
-                SELECT 
-                    ? AS ID,
-                    ? AS auditRunID_ID,
-                    gm.userId,
-                    gm.userName,
-                    rtp.roleId,
-                    rtp.roleName,
-                    gm.groupName
-                FROM sap_sf_audit_GroupMembers gm
-                JOIN sap_sf_audit_RoleTargetPopulations rtp 
-                    ON rtp.groupId = gm.groupID AND rtp.auditRunID_ID = ?
-                WHERE gm.auditRunID_ID = ?
-            `, [uuidv4(), auditRunID, auditRunID, auditRunID]);
-            auditLogger.info('User-role mappings populated');
-        } catch (error) {
-            auditLogger.error({ error: error.message }, 'Failed to populate user-role mappings');
+        // Get used role IDs using raw SQL (avoid CAP distinct issue)
+        const rolesWithTargets = await tx.run(`
+            SELECT DISTINCT roleId 
+            FROM sap_sf_audit_RoleTargetPopulations 
+            WHERE auditRunID_ID = ?
+        `, [auditRunID]);
+        
+        const usedRoleIds = new Set(rolesWithTargets.map(r => r.ROLEID));
+
+        const roles = await tx.run(
+            SELECT.from('Roles').where({ auditRunID_ID: auditRunID })
+        );
+
+        for (const role of roles) {
+            if (!usedRoleIds.has(role.roleId)) {
+                await tx.run(`
+                    INSERT INTO sap_sf_audit_UnusedRoles (
+                        ID, auditRunID_ID, roleId, roleName, roleType, recommendation
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                `, [
+                    uuidv4(), auditRunID, role.roleId, role.roleName,
+                    role.roleType || 'standard', 'Review / Decommission'
+                ]);
+            }
         }
+
+        auditLogger.info('Role targets and unused roles populated');
+    } catch (error) {
+        auditLogger.error({ error: error.message }, 'Failed to populate role targets');
     }
+}
+
+  async function _populateUserRoleMappings(tx, auditRunID, auditLogger) {
+    try {
+        auditLogger.info('Populating user-role mappings');
+        
+        await tx.run(DELETE.from('UserRoleMappings').where({ auditRunID_ID: auditRunID }));
+        
+        // Use raw SQL for better compatibility
+        await tx.run(`
+            INSERT INTO sap_sf_audit_UserRoleMappings 
+            (ID, auditRunID_ID, userId, userName, roleId, roleName, assignedViaGroup)
+            SELECT 
+                ?,
+                ?,
+                gm.userId,
+                gm.userName,
+                rtp.roleId,
+                rtp.roleName,
+                gm.groupName
+            FROM sap_sf_audit_GroupMembers gm
+            INNER JOIN sap_sf_audit_RoleTargetPopulations rtp 
+                ON rtp.groupId = gm.groupID 
+            WHERE gm.auditRunID_ID = ? 
+                AND rtp.auditRunID_ID = ?
+        `, [uuidv4(), auditRunID, auditRunID, auditRunID]);
+        
+        // Check how many were inserted
+        const count = await tx.run(`
+            SELECT COUNT(*) as cnt 
+            FROM sap_sf_audit_UserRoleMappings 
+            WHERE auditRunID_ID = ?
+        `, [auditRunID]);
+        
+        auditLogger.info({ insertedCount: count[0]?.CNT }, 'User-role mappings populated');
+        
+    } catch (error) {
+        auditLogger.error({ error: error.message }, 'Failed to populate user-role mappings');
+    }
+}
 
     // FIXED: Replaced new Date() with CURRENT_TIMESTAMP
-    async function _generateExecutiveSummary(tx, auditRunID, auditLogger) {
+  async function _generateExecutiveSummary(tx, auditRunID, auditLogger) {
+    try {
+        auditLogger.info('Generating executive summary');
+        
+        // LOG 1: Check if we have data in tables
+        console.log('=== DEBUG: Executive Summary Start ===');
+        console.log('AuditRunID:', auditRunID);
+        
+        // Check Groups count
+        const groupCheck = await tx.run(`
+            SELECT COUNT(*) as cnt FROM sap_sf_audit_Groups WHERE auditRunID_ID = ?
+        `, [auditRunID]);
+        console.log('Groups in this audit run:', groupCheck[0]?.CNT);
+        
+        // Check GroupMembers count
+        const memberCheck = await tx.run(`
+            SELECT COUNT(DISTINCT userId) as cnt FROM sap_sf_audit_GroupMembers WHERE auditRunID_ID = ?
+        `, [auditRunID]);
+        console.log('Unique users in memberships:', memberCheck[0]?.CNT);
+        
+        // LOG 2: Check audit run details
+        const auditRunResult = await tx.run(
+            SELECT.one.from('AuditRuns').where({ ID: auditRunID })
+        );
+        console.log('Audit run instance:', auditRunResult?.INSTANCE || auditRunResult?.instance);
+        console.log('Audit run mode:', auditRunResult?.MODE || auditRunResult?.mode);
+        
+        // LOG 3: Test each metric individually
+        const staticGroups = await tx.run(`
+            SELECT COUNT(*) as cnt FROM sap_sf_audit_Groups 
+            WHERE auditRunID_ID = ? AND groupType = 'STATIC'
+        `, [auditRunID]);
+        console.log('Static groups count:', staticGroups[0]?.CNT);
+        
+        const dynamicGroups = await tx.run(`
+            SELECT COUNT(*) as cnt FROM sap_sf_audit_Groups 
+            WHERE auditRunID_ID = ? AND groupType = 'DYNAMIC'
+        `, [auditRunID]);
+        console.log('Dynamic groups count:', dynamicGroups[0]?.CNT);
+        
+        // LOG 4: Check if ExecutiveSummary already has data
+        const existingCount = await tx.run(`
+            SELECT COUNT(*) as cnt FROM sap_sf_audit_ExecutiveSummary WHERE auditRunID_ID = ?
+        `, [auditRunID]);
+        console.log('Existing records before delete:', existingCount[0]?.CNT);
+        
+        // Delete existing
+        await tx.run(DELETE.from('ExecutiveSummary').where({ auditRunID_ID: auditRunID }));
+        
+        // LOG 5: Test the INSERT with minimal fields first
+        const testId = uuidv4();
+        console.log('Testing minimal insert with ID:', testId);
+        
         try {
-            auditLogger.info('Generating executive summary');
-            
-            await tx.run(DELETE.from('ExecutiveSummary').where({ auditRunID_ID: auditRunID }));
-            
-            const auditRunResult = await tx.run(
-                SELECT.one.from('AuditRuns').where({ ID: auditRunID })
-            );
-            
-            const metrics = await tx.run(`
-                SELECT 
-                    (SELECT COUNT(*) FROM sap_sf_audit_Groups WHERE auditRunID_ID = ? AND groupType = 'STATIC') as totalStaticGroups,
-                    (SELECT COUNT(*) FROM sap_sf_audit_Groups WHERE auditRunID_ID = ? AND groupType = 'DYNAMIC') as totalDynamicGroups,
-                    (SELECT COUNT(*) FROM sap_sf_audit_Groups WHERE auditRunID_ID = ?) as totalGroups,
-                    (SELECT COUNT(DISTINCT userId) FROM sap_sf_audit_GroupMembers WHERE auditRunID_ID = ?) as totalUniqueUsers,
-                    (SELECT COUNT(*) FROM sap_sf_audit_MultiGroupUsers WHERE auditRunID_ID = ? AND riskLevel = 'High') as highAccessUsersCount,
-                    (SELECT COUNT(*) FROM sap_sf_audit_Groups WHERE auditRunID_ID = ? AND totalMemberCount >= 51) as largeGroupsCount
-                FROM DUMMY
-            `, [auditRunID, auditRunID, auditRunID, auditRunID, auditRunID, auditRunID]);
-            
-            const m = metrics[0];
-            
-            // FIXED: Use CURRENT_TIMESTAMP instead of new Date()
             await tx.run(`
                 INSERT INTO sap_sf_audit_ExecutiveSummary 
-                (ID, auditRunID_ID, totalStaticGroups, totalDynamicGroups, totalGroups,
-                 totalUniqueUsers, usersHighAccess, groupsLargeMembership,
-                 highAccessUsersCount, largeGroupsCount,
-                 instanceLabel, generationTimestamp, extractionMode)
-                VALUES (SYSUUID, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
-            `, [
-                auditRunID,
-                Number(m.TOTALSTATICGROUPS) || 0,
-                Number(m.TOTALDYNAMICGROUPS) || 0,
-                Number(m.TOTALGROUPS) || 0,
-                Number(m.TOTALUNIQUEUSERS) || 0,
-                Number(m.HIGHACCESSUSERSCOUNT) || 0,
-                Number(m.LARGEGROUPSCOUNT) || 0,
-                Number(m.HIGHACCESSUSERSCOUNT) || 0,
-                Number(m.LARGEGROUPSCOUNT) || 0,
-                auditRunResult?.INSTANCE || 'QAS',
-                auditRunResult?.MODE || 'FULL'
-            ]);
+                (ID, auditRunID_ID, totalGroups, generationTimestamp)
+                VALUES (?, ?, 0, CURRENT_TIMESTAMP)
+            `, [testId, auditRunID]);
+            console.log('✅ Minimal insert SUCCESS');
             
-            const result = await tx.run(`SELECT COUNT(*) as cnt FROM sap_sf_audit_ExecutiveSummary WHERE auditRunID_ID = ?`, [auditRunID]);
-            auditLogger.info({ insertedCount: result[0]?.CNT }, 'Executive summary populated');
-            
-        } catch (error) {
-            auditLogger.error({ error: error.message, stack: error.stack }, 'Failed to generate executive summary');
-            throw error;
+            // Clean up test
+            await tx.run(`DELETE FROM sap_sf_audit_ExecutiveSummary WHERE ID = ?`, [testId]);
+            console.log('Test record cleaned up');
+        } catch (insertError) {
+            console.log('❌ Minimal insert FAILED:', insertError.message);
+            console.log('Error details:', insertError);
+            throw insertError;
         }
+        
+        // LOG 6: Now try the full query with proper column access
+        const metrics = await tx.run(`
+            SELECT 
+                (SELECT COUNT(*) FROM sap_sf_audit_Groups WHERE auditRunID_ID = ? AND groupType = 'STATIC') as totalStaticGroups,
+                (SELECT COUNT(*) FROM sap_sf_audit_Groups WHERE auditRunID_ID = ? AND groupType = 'DYNAMIC') as totalDynamicGroups,
+                (SELECT COUNT(*) FROM sap_sf_audit_Groups WHERE auditRunID_ID = ?) as totalGroups,
+                (SELECT COUNT(DISTINCT userId) FROM sap_sf_audit_GroupMembers WHERE auditRunID_ID = ?) as totalUniqueUsers,
+                (SELECT COUNT(*) FROM sap_sf_audit_MultiGroupUsers WHERE auditRunID_ID = ? AND riskLevel = 'High') as highAccessUsersCount,
+                (SELECT COUNT(*) FROM sap_sf_audit_Groups WHERE auditRunID_ID = ? AND totalMemberCount >= 51) as largeGroupsCount
+            FROM DUMMY
+        `, [auditRunID, auditRunID, auditRunID, auditRunID, auditRunID, auditRunID]);
+        
+        console.log('Metrics query result:', JSON.stringify(metrics[0], null, 2));
+        
+        const m = metrics[0];
+        console.log('Accessing properties:');
+        console.log('  m.TOTALSTATICGROUPS:', m.TOTALSTATICGROUPS);
+        console.log('  m.totalStaticGroups:', m.totalStaticGroups);
+        
+        // LOG 7: Try the actual insert
+        console.log('Attempting full insert...');
+        await tx.run(`
+            INSERT INTO sap_sf_audit_ExecutiveSummary 
+            (ID, auditRunID_ID, totalStaticGroups, totalDynamicGroups, totalGroups,
+             totalUniqueUsers, usersHighAccess, groupsLargeMembership,
+             highAccessUsersCount, largeGroupsCount,
+             instanceLabel, generationTimestamp, extractionMode)
+            VALUES (SYSUUID, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+        `, [
+            auditRunID,
+            Number(m.TOTALSTATICGROUPS) || 0,
+            Number(m.TOTALDYNAMICGROUPS) || 0,
+            Number(m.TOTALGROUPS) || 0,
+            Number(m.TOTALUNIQUEUSERS) || 0,
+            Number(m.HIGHACCESSUSERSCOUNT) || 0,
+            Number(m.LARGEGROUPSCOUNT) || 0,
+            Number(m.HIGHACCESSUSERSCOUNT) || 0,
+            Number(m.LARGEGROUPSCOUNT) || 0,
+            auditRunResult?.INSTANCE || auditRunResult?.instance || 'Unknown',
+            auditRunResult?.MODE || auditRunResult?.mode || 'FULL'
+        ]);
+        console.log('✅ Insert completed successfully');
+        
+        // LOG 8: Verify the insert
+        const verify = await tx.run(`
+            SELECT COUNT(*) as cnt FROM sap_sf_audit_ExecutiveSummary WHERE auditRunID_ID = ?
+        `, [auditRunID]);
+        console.log('Records after insert:', verify[0]?.CNT);
+        
+        const result = await tx.run(`SELECT COUNT(*) as cnt FROM sap_sf_audit_ExecutiveSummary WHERE auditRunID_ID = ?`, [auditRunID]);
+        auditLogger.info({ insertedCount: result[0]?.CNT }, 'Executive summary populated');
+        
+    } catch (error) {
+        console.log('❌ ERROR in _generateExecutiveSummary:', error.message);
+        console.log('Full error:', error);
+        auditLogger.error({ error: error.message, stack: error.stack }, 'Failed to generate executive summary');
+        throw error;
     }
+}
 
     async function _populateMultiGroupUsers(tx, auditRunID, auditLogger) {
         try {
@@ -703,37 +858,44 @@ module.exports = cds.service.impl(async function () {
         }
     }
 
-    async function _populateInactiveUserAccess(tx, auditRunID, auditLogger) {
-        try {
-            auditLogger.info('Populating inactive users with access');
-            await tx.run(DELETE.from('InactiveUserAccess').where({ auditRunID_ID: auditRunID }));
-            await tx.run(`
-                INSERT INTO sap_sf_audit_InactiveUserAccess 
-                (ID, auditRunID_ID, userId, userName, firstName, lastName, status, hireDate, permissionGroups, groupCount, riskScore, riskCategory, recommendedAction)
-                SELECT 
-                    ? AS ID,
-                    ? AS auditRunID_ID,
-                    u.userId,
-                    u.userName,
-                    u.firstName,
-                    u.lastName,
-                    u.status,
-                    u.hireDate,
-                    STRING_AGG(gm.groupName, ', ') AS permissionGroups,
-                    COUNT(DISTINCT gm.groupID) AS groupCount,
-                    COUNT(DISTINCT gm.groupID) * 10 AS riskScore,
-                    'High' AS riskCategory,
-                    'Remove access immediately' AS recommendedAction
-                FROM sap_sf_audit_Users u
-                JOIN sap_sf_audit_GroupMembers gm ON gm.userId = u.userId AND gm.auditRunID_ID = ?
-                WHERE u.status = 'inactive' AND u.auditRunID_ID = ?
-                GROUP BY u.userId, u.userName, u.firstName, u.lastName, u.status, u.hireDate
-            `, [uuidv4(), auditRunID, auditRunID, auditRunID]);
-            auditLogger.info('Inactive users with access populated');
-        } catch (error) {
-            auditLogger.error({ error: error.message }, 'Failed to populate inactive user access');
-        }
+  async function _populateInactiveUserAccess(tx, auditRunID, auditLogger) {
+    try {
+        auditLogger.info('Populating inactive users with access');
+        
+        await tx.run(DELETE.from('InactiveUserAccess').where({ auditRunID_ID: auditRunID }));
+        
+        // Fix: Remove u.auditRunID_ID (Users table doesn't have this column)
+        await tx.run(`
+            INSERT INTO sap_sf_audit_InactiveUserAccess 
+            (ID, auditRunID_ID, userId, userName, firstName, lastName, status, hireDate, permissionGroups, groupCount, riskScore, riskCategory, recommendedAction)
+            SELECT 
+                ?,
+                ?,
+                u.userId,
+                u.userName,
+                u.firstName,
+                u.lastName,
+                u.status,
+                u.hireDate,
+                STRING_AGG(gm.groupName, ', '),
+                COUNT(DISTINCT gm.groupID),
+                COUNT(DISTINCT gm.groupID) * 10,
+                'High',
+                'Remove access immediately'
+            FROM sap_sf_audit_Users u
+            INNER JOIN sap_sf_audit_GroupMembers gm ON gm.userId = u.userId
+            WHERE u.status = 'inactive' 
+                AND gm.auditRunID_ID = ?
+            GROUP BY u.userId, u.userName, u.firstName, u.lastName, u.status, u.hireDate
+        `, [uuidv4(), auditRunID, auditRunID]);
+        
+        const result = await tx.run(`SELECT COUNT(*) as cnt FROM sap_sf_audit_InactiveUserAccess WHERE auditRunID_ID = ?`, [auditRunID]);
+        auditLogger.info({ insertedCount: result[0]?.CNT }, 'Inactive users with access populated');
+        
+    } catch (error) {
+        auditLogger.error({ error: error.message }, 'Failed to populate inactive user access');
     }
+}
 
     async function _populateGroupSizeDistribution(tx, auditRunID, auditLogger) {
         try {
@@ -867,60 +1029,121 @@ module.exports = cds.service.impl(async function () {
         }
     });
 
-    this.on('syncUsers', async (req) => {
-        const { instance } = req.data;
-        const syncLogger = logger.child({ operation: 'SYNC_USERS', instance });
-        if (!instance) {
-            req.error(400, 'Instance parameter is required');
-            return { success: false, message: 'Instance parameter is required', stats: null };
-        }
-        const tx = cds.transaction(req);
-        try {
-            const existingUserCount = await tx.run(
-                SELECT.one.from('Users').where({ instance: instance }).columns('count(*) as count')
-            );
-            const userCount = Number(existingUserCount[0]?.count || 0);
-            if (userCount > 0) {
-                await tx.commit();
-                syncLogger.info({ userCount }, 'Users already synced for this instance');
-                return {
-                    success: true,
-                    message: `Users already synced for instance '${instance}'. ${userCount} users exist.`,
-                    alreadySynced: true,
-                    stats: {
-                        existingCount: userCount,
-                        inserted: 0,
-                        updated: 0,
-                        total: userCount,
-                        timestamp: new Date().toISOString()
-                    }
-                };
-            }
-            syncLogger.info('No users found, fetching from SuccessFactors');
-            const sfConfig = await _getSFDestination(instance, syncLogger, req);
-            const rawUsers = await _fetchAllUsers(sfConfig, syncLogger);
-            const users = _formatUsers(rawUsers, instance);
-            const stats = await _upsertUsers(tx, users, instance, syncLogger);
+  this.on('syncUsers', async (req) => {
+    const { instance } = req.data;
+    const syncLogger = logger.child({ operation: 'SYNC_USERS', instance });
+    
+    if (!instance) {
+        req.error(400, 'Instance parameter is required');
+        return { success: false, message: 'Instance parameter is required', stats: null };
+    }
+    
+    const tx = cds.transaction(req);
+    
+    try {
+        console.log('=== DEBUG: syncUsers ===');
+        console.log('Instance:', instance);
+        
+        // STEP 1: Check total users in the table (without any filter)
+        const totalAllUsers = await tx.run(`
+            SELECT COUNT(*) as total FROM sap_sf_audit_Users
+        `);
+        console.log('Total users in Users table (all instances):', totalAllUsers[0]?.TOTAL);
+        
+        // STEP 2: Check users for this specific instance
+        const existingUserCount = await tx.run(`
+            SELECT COUNT(*) as count FROM sap_sf_audit_Users WHERE instance = ?
+        `, [instance]);
+        
+        const userCount = Number(existingUserCount[0]?.COUNT || 0);
+        console.log(`Users for instance '${instance}':`, userCount);
+        
+        // STEP 3: Check what instances exist in the Users table
+        const distinctInstances = await tx.run(`
+            SELECT DISTINCT instance, COUNT(*) as count 
+            FROM sap_sf_audit_Users 
+            GROUP BY instance
+        `);
+        console.log('Distinct instances in Users table:', distinctInstances);
+        
+        // STEP 4: Check if there are any users with NULL instance
+        const nullInstanceUsers = await tx.run(`
+            SELECT COUNT(*) as count FROM sap_sf_audit_Users WHERE instance IS NULL
+        `);
+        console.log('Users with NULL instance:', nullInstanceUsers[0]?.COUNT);
+        
+        // STEP 5: Try to get a sample user to verify data
+        const sampleUser = await tx.run(`
+            SELECT userId, instance, userName FROM sap_sf_audit_Users LIMIT 1
+        `);
+        console.log('Sample user from table:', sampleUser[0]);
+        
+        // STEP 6: Check if _formatUsers is setting instance correctly
+        // This will be checked when we fetch from SF
+        
+        if (userCount > 0) {
             await tx.commit();
+            syncLogger.info({ userCount }, 'Users already synced for this instance');
+            console.log('✅ Users already exist - returning without syncing');
+            
             return {
                 success: true,
-                message: `Users synchronized successfully from ${instance}`,
-                alreadySynced: false,
+                message: `Users already synced for instance '${instance}'. ${userCount} users exist.`,
+                alreadySynced: true,
                 stats: {
-                    inserted: stats.inserted,
-                    updated: stats.updated,
-                    total: users.length,
-                    existingCount: 0,
+                    existingCount: userCount,
+                    inserted: 0,
+                    updated: 0,
+                    total: userCount,
                     timestamp: new Date().toISOString()
                 }
             };
-        } catch (error) {
-            syncLogger.error({ error: error.message }, 'User sync failed');
-            await tx.rollback();
-            req.error(500, `User sync failed: ${error.message}`);
-            return { success: false, message: error.message, stats: null };
         }
-    });
+        
+        // STEP 7: No users found - proceed with sync
+        console.log('⚠️ No users found for this instance - starting full sync');
+        syncLogger.info('No users found, fetching from SuccessFactors');
+        
+        const sfConfig = await _getSFDestination(instance, syncLogger, req);
+        const rawUsers = await _fetchAllUsers(sfConfig, syncLogger);
+        
+        console.log(`Fetched ${rawUsers.length} users from SuccessFactors`);
+        console.log('First user sample:', rawUsers[0] ? {
+            userId: rawUsers[0].userId,
+            userName: rawUsers[0].userName
+        } : 'No users');
+        
+        const users = _formatUsers(rawUsers, instance);
+        console.log(`Formatted ${users.length} users with instance:`, users[0]?.instance);
+        
+        const stats = await _upsertUsers(tx, users, instance, syncLogger);
+        
+        await tx.commit();
+        
+        console.log('✅ User sync completed successfully');
+        console.log(`Inserted: ${stats.inserted}, Updated: ${stats.updated}`);
+        
+        return {
+            success: true,
+            message: `Users synchronized successfully from ${instance}`,
+            alreadySynced: false,
+            stats: {
+                inserted: stats.inserted,
+                updated: stats.updated,
+                total: users.length,
+                existingCount: 0,
+                timestamp: new Date().toISOString()
+            }
+        };
+        
+    } catch (error) {
+        console.error('❌ syncUsers error:', error);
+        syncLogger.error({ error: error.message }, 'User sync failed');
+        await tx.rollback();
+        req.error(500, `User sync failed: ${error.message}`);
+        return { success: false, message: error.message, stats: null };
+    }
+});
 
     this.on('syncUsersIncremental', async (req) => {
         const { instance, lastSyncDate } = req.data;
@@ -961,6 +1184,8 @@ module.exports = cds.service.impl(async function () {
             return { success: false, message: error.message };
         }
     });
+
+    
 
     this.on('getUsers', async (req) => {
         const { top = 100, skip = 0, status = null, search = null, instance = null } = req.data;
