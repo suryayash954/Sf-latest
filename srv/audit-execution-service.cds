@@ -12,7 +12,15 @@ service AuditExecutionService @(path: '/SuccessFactorRBPAudit') {
   entity Groups as projection on db.Groups;
   entity GroupMembers as projection on db.GroupMembers;
   entity Roles as projection on db.Roles;
-  
+  entity MultiGroupUsers as projection on db.MultiGroupUsers;        // ← ADD THIS
+  entity InactiveUserAccess as projection on db.InactiveUserAccess;  // ← ADD THIS
+  entity GroupSizeDistribution as projection on db.GroupSizeDistribution;  // ← ADD THIS
+  entity StaticVsDynamicGroups as projection on db.StaticVsDynamicGroups;  // ← ADD THIS
+  entity UserGroupCountDistribution as projection on db.UserGroupCountDistribution;  // ← ADD THIS
+  entity ExecutiveSummary as projection on db.ExecutiveSummary;      // ← ADD THIS
+  entity RoleTargetPopulations as projection on db.RoleTargetPopulations;  // ← ADD THIS
+  entity UserRoleMappings as projection on db.UserRoleMappings;      // ← ADD THIS
+  entity UnusedRoles as projection on db.UnusedRoles;       
   // ============================================
   // Get Available Instances (Value Help for UI)
   // ============================================

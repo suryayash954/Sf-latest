@@ -256,15 +256,49 @@ async function getHighRiskUsers(req) {
     const tx = cds.transaction(req);
     
     try {
-        const users = await tx.run(
-            SELECT.from('MultiGroupUsers')
-                .where({ auditRunID_ID: auditRunID, riskScore: { '>=': minRiskScore } })
-                .orderBy('riskScore desc')
-                .limit(top, skip)
-        );
+        // First check if MultiGroupUsers has data
+        const countCheck = await tx.run(`
+            SELECT COUNT(*) as cnt 
+            FROM sap_sf_audit_MultiGroupUsers 
+            WHERE auditRunID_ID = ?
+        `, [auditRunID]);
         
-        return users;
+        console.log('MultiGroupUsers count:', countCheck[0]?.CNT);
+        
+        if (countCheck[0]?.CNT === 0) {
+            // No data - return empty array with explanation
+            return [];
+        }
+        
+        const users = await tx.run(`
+            SELECT 
+                userId,
+                userName,
+                groupCount,
+                groupNames,
+                riskLevel,
+                riskScore,
+                riskCategory,
+                recommendedAction
+            FROM sap_sf_audit_MultiGroupUsers
+            WHERE auditRunID_ID = ? AND riskScore >= ?
+            ORDER BY riskScore DESC
+            LIMIT ? OFFSET ?
+        `, [auditRunID, minRiskScore, top, skip]);
+        
+        return users.map(u => ({
+            userId: u.USERID,
+            userName: u.USERNAME,
+            groupCount: Number(u.GROUPCOUNT || 0),
+            groupNames: u.GROUPNAMES || '',
+            riskLevel: u.RISKLEVEL || 'Low',
+            riskScore: Number(u.RISKSCORE || 0),
+            riskCategory: u.RISKCATEGORY || 'Normal',
+            recommendedAction: u.RECOMMENDEDACTION || 'Monitor'
+        }));
+        
     } catch (error) {
+        console.error('getHighRiskUsers error:', error.message);
         req.error(500, error.message);
         return [];
     }

@@ -120,11 +120,11 @@ Content-Type: application/json
 }
 
 ### Get Audit Status (Replace YOUR_AUDIT_RUN_ID)
-GET {{baseUrl}}/SuccessFactorRBPAudit/getAuditStatus(auditRunID=YOUR_AUDIT_RUN_ID)
+POST {{baseUrl}}/SuccessFactorRBPAudit/getAuditStatus(auditRunID=85b6a28a-471a-439a-bcc5-7ac6cdb54843)
 Content-Type: application/json
 
 ### List all Audit Runs
-POST {{baseUrl}}/SuccessFactorRBPAudit/listAuditRuns
+GET {{baseUrl}}/SuccessFactorRBPAudit/listAuditRuns
 Content-Type: application/json
 
 {
@@ -152,12 +152,21 @@ Content-Type: application/json
 ### ============================================
 
 ### Get Groups for audit run (Replace ID)
-GET {{baseUrl}}/SuccessFactorRBPAudit/Groups?$filter=auditRunID_ID eq 'e9df2922-fcca-4a92-a169-550b81229fd1'&$top=10
+GET {{baseUrl}}/SuccessFactorRBPAudit/Groups?$filter=auditRunID_ID eq '85b6a28a-471a-439a-bcc5-7ac6cdb54843'&$top=10
 Content-Type: application/json
 
 ### Get Group Members
-GET {{baseUrl}}/SuccessFactorRBPAudit/GroupMembers?$filter=auditRunID_ID eq 'YOUR_AUDIT_RUN_ID'&$top=20
+GET {{baseUrl}}/SuccessFactorRBPAudit/GroupMembers?$filter=auditRunID_ID eq '85b6a28a-471a-439a-bcc5-7ac6cdb54843'&$top=20
 Content-Type: application/json
+
+###
+### Debug MultiGroup
+POST {{baseUrl}}/SuccessFactorRBPAudit/debugMultiGroup
+Content-Type: application/json
+
+{
+    "auditRunID": "85b6a28a-471a-439a-bcc5-7ac6cdb54843"
+}
 
 ### Get Roles for audit run (if extracted)
 GET {{baseUrl}}/SuccessFactorRBPAudit/Roles?$filter=auditRunID_ID eq 'YOUR_AUDIT_RUN_ID'&$top=10
@@ -172,7 +181,7 @@ GET {{baseUrl}}/SuccessFactorRBPAudit/UserRoleMappings?$filter=auditRunID_ID eq 
 Content-Type: application/json
 
 ### Get Multi-Group Users (Risk Analysis)
-GET {{baseUrl}}/SuccessFactorRBPAudit/MultiGroupUsers?$filter=auditRunID_ID eq 'YOUR_AUDIT_RUN_ID'&$top=10
+GET {{baseUrl}}/SuccessFactorRBPAudit/MultiGroupUsers?$filter=auditRunID_ID eq '85b6a28a-471a-439a-bcc5-7ac6cdb54843'&$top=10
 Content-Type: application/json
 
 ### Get Inactive Users with Access

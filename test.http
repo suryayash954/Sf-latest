@@ -4,7 +4,7 @@
 ### ============================================
 
 @baseUrl = https://35da9743trial-dev-sf-permission-audit-srv.cfapps.us10-001.hana.ondemand.com
-@accessToken = eyJ0eXAiOiJKV1QiLCJqaWQiOiJsMFBvZU1pOGdpSEdMQkszZUh3YjJydnFuOFR6c1NUUlhvMEhyRFRLaEFVPSIsImFsZyI6IlJTMjU2Iiwiamt1IjoiaHR0cHM6Ly8zNWRhOTc0M3RyaWFsLmF1dGhlbnRpY2F0aW9uLnVzMTAuaGFuYS5vbmRlbWFuZC5jb20vdG9rZW5fa2V5cyIsImtpZCI6ImRlZmF1bHQtand0LWtleS03MmM2MzE4MTA3In0.eyJzdWIiOiJzYi1zZi1wZXJtaXNzaW9uLWF1ZGl0LTM1ZGE5NzQzdHJpYWwtZGV2IXQ2MzE1NDMiLCJpc3MiOiJodHRwczovLzM1ZGE5NzQzdHJpYWwuYXV0aGVudGljYXRpb24udXMxMC5oYW5hLm9uZGVtYW5kLmNvbS9vYXV0aC90b2tlbiIsImF1dGhvcml0aWVzIjpbInVhYS5yZXNvdXJjZSJdLCJjbGllbnRfaWQiOiJzYi1zZi1wZXJtaXNzaW9uLWF1ZGl0LTM1ZGE5NzQzdHJpYWwtZGV2IXQ2MzE1NDMiLCJhdWQiOlsidWFhIiwic2Itc2YtcGVybWlzc2lvbi1hdWRpdC0zNWRhOTc0M3RyaWFsLWRldiF0NjMxNTQzIl0sImV4dF9hdHRyIjp7ImVuaGFuY2VyIjoiWFNVQUEiLCJzdWJhY2NvdW50aWQiOiIxODUxZTg3Ni02ZDA3LTRmYzgtOGM5Ny02NjA4YWM4MGRiODUiLCJ6ZG4iOiIzNWRhOTc0M3RyaWFsIn0sInppZCI6IjE4NTFlODc2LTZkMDctNGZjOC04Yzk3LTY2MDhhYzgwZGI4NSIsImdyYW50X3R5cGUiOiJjbGllbnRfY3JlZGVudGlhbHMiLCJhenAiOiJzYi1zZi1wZXJtaXNzaW9uLWF1ZGl0LTM1ZGE5NzQzdHJpYWwtZGV2IXQ2MzE1NDMiLCJzY29wZSI6WyJ1YWEucmVzb3VyY2UiXSwiZXhwIjoxNzc2ODg3Mzg4LCJpYXQiOjE3NzY4NDQxODgsImp0aSI6IjZkNmMwZDBmZDU0NjRlN2U4MmU4OWE3ZmJiNDEyYThkIiwicmV2X3NpZyI6IjcyMWVmODM0IiwiY2lkIjoic2Itc2YtcGVybWlzc2lvbi1hdWRpdC0zNWRhOTc0M3RyaWFsLWRldiF0NjMxNTQzIn0.WIXIAZZzk_lnDMp1kv9HWTbF-lZtySqbrrZyL4tdzdxie6yX1Fn6-nBJeS2wUTPGREqS04Pgnhp4m3eiUth_uXcSLTMJMyNY65IWZGraIxWWwIFrXtITx0gQW6NbBWqTQbEi5qiabuafSD2BgTqCSsW7eVoWcD7PiEHW9DQtrvivMPmFDaAAsE5DvVvcbzQiImNgT4rR8y0K71nBen01PQ961FoJ412PrPsHs6hSRo6mcnbIUJ4rLxt34aPYnwAWYjHUwa2ZLRtTbgB1EymvlBovGusXULtkShQTytUEaur9aZu7sHwzSQ0tX-yvdsYhWZihLmWEsOAQLPO-pLZhMA
+@accessToken = eyJ0eXAiOiJKV1QiLCJqaWQiOiIrOHJQcS9xZC93MjNlTzM0SUZjZlQ3TzN4dkJqUmhXOEtLOFZXSG5rZkVJPSIsImFsZyI6IlJTMjU2Iiwiamt1IjoiaHR0cHM6Ly8zNWRhOTc0M3RyaWFsLmF1dGhlbnRpY2F0aW9uLnVzMTAuaGFuYS5vbmRlbWFuZC5jb20vdG9rZW5fa2V5cyIsImtpZCI6ImRlZmF1bHQtand0LWtleS03MmM2MzE4MTA3In0.eyJzdWIiOiJzYi1zZi1wZXJtaXNzaW9uLWF1ZGl0LTM1ZGE5NzQzdHJpYWwtZGV2IXQ2MzE1NDMiLCJpc3MiOiJodHRwczovLzM1ZGE5NzQzdHJpYWwuYXV0aGVudGljYXRpb24udXMxMC5oYW5hLm9uZGVtYW5kLmNvbS9vYXV0aC90b2tlbiIsImF1dGhvcml0aWVzIjpbInVhYS5yZXNvdXJjZSJdLCJjbGllbnRfaWQiOiJzYi1zZi1wZXJtaXNzaW9uLWF1ZGl0LTM1ZGE5NzQzdHJpYWwtZGV2IXQ2MzE1NDMiLCJhdWQiOlsidWFhIiwic2Itc2YtcGVybWlzc2lvbi1hdWRpdC0zNWRhOTc0M3RyaWFsLWRldiF0NjMxNTQzIl0sImV4dF9hdHRyIjp7ImVuaGFuY2VyIjoiWFNVQUEiLCJzdWJhY2NvdW50aWQiOiIxODUxZTg3Ni02ZDA3LTRmYzgtOGM5Ny02NjA4YWM4MGRiODUiLCJ6ZG4iOiIzNWRhOTc0M3RyaWFsIn0sInppZCI6IjE4NTFlODc2LTZkMDctNGZjOC04Yzk3LTY2MDhhYzgwZGI4NSIsImdyYW50X3R5cGUiOiJjbGllbnRfY3JlZGVudGlhbHMiLCJhenAiOiJzYi1zZi1wZXJtaXNzaW9uLWF1ZGl0LTM1ZGE5NzQzdHJpYWwtZGV2IXQ2MzE1NDMiLCJzY29wZSI6WyJ1YWEucmVzb3VyY2UiXSwiZXhwIjoxNzc2OTY5MDczLCJpYXQiOjE3NzY5MjU4NzMsImp0aSI6IjM1NDM5Yjc2MTg4ZDRhMWJiNDhlZDZhZmRkOGEyMjU3IiwicmV2X3NpZyI6IjcyMWVmODM0IiwiY2lkIjoic2Itc2YtcGVybWlzc2lvbi1hdWRpdC0zNWRhOTc0M3RyaWFsLWRldiF0NjMxNTQzIn0.DSjAjqA6VPPCxsfUOH2Jufkf2qNOoV8Ob2rhwpGogc_AR2AJ1zVVnH5FLpLLu55p7ydmhmJnXVzp4LyjKiEK5O2HZsnQo5KwFsI5W78FFCy2OhO8Axcu7XFZEw4qG66h2k0hJp4Nvtud7wM9MqkbLZuDpW6bBaJ2gPsx3IMdcKG1_5fd36pT6Zzt7b2jQxI8Zy48pLHDxo07k_hyq3HoOGydU1Oh7KQpxMgePh_LpmRlFIBL1fKcBI9yjYy18hK8TjfufFLTgUNdJiU1ekdW4TOju6xGhWjaMzw00JjWLmjJG3c8y1SOcynEW8wHWOjos7OB4vRSwvfDTYZ8Un_4bA
 
 ### ============================================
 ### 1. GET AVAILABLE INSTANCES
@@ -35,7 +35,7 @@ Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-    "name": "Cloud Audit - Groups Only",
+    "name": "Cloud Audit",
     "description": "Testing audit without roles in cloud",
     "mode": "SAMPLE",
     "instance": "successfactors",
@@ -70,9 +70,13 @@ Content-Type: application/json
 ### 5. GET AUDIT STATUS (Replace YOUR_AUDIT_RUN_ID)
 ### ============================================
 
-GET {{baseUrl}}/SuccessFactorRBPAudit/getAuditStatus(auditRunID=becc5f76-9309-4911-94fb-53aaf081631f)
+POST {{baseUrl}}//SuccessFactorRBPAudit/getAuditStatus
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
+
+{
+    "auditRunID": "ca6bffc5-f274-4f2b-b971-2f4a9b49e340"
+}
 
 ### ============================================
 ### 6. LIST ALL AUDIT RUNS
@@ -121,12 +125,12 @@ Content-Type: application/json
 ### 10. GET RISK DASHBOARD (Replace YOUR_AUDIT_RUN_ID)
 ### ============================================
 
-POST {{baseUrl}}/SuccessFactorRBPReport/getRiskDashboard
+GET {{baseUrl}}/SuccessFactorRBPReport/getRiskDashboard
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-    "auditRunID": "becc5f76-9309-4911-94fb-53aaf081631f"
+    "auditRunID": "85b6a28a-471a-439a-bcc5-7ac6cdb54843"
 }
 
 ### ============================================
