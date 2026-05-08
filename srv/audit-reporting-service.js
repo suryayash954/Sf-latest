@@ -94,45 +94,45 @@ async function getRiskDashboard(req) {
     // ============================
     // GROUP DETAILS (OPTIMIZED)
     // ============================
-    async function getGroupDetails(req) {
+  async function getGroupDetails(req) {
+    const { auditRunID, top = 100, skip = 0 } = req.data;
+    const tx = cds.transaction(req);
 
-        const { auditRunID, top = 100, skip = 0 } = req.data;
-        const tx = cds.transaction(req);
+    try {
+        const groups = await tx.run(`
+            SELECT 
+                g.groupID,
+                g.groupName,
+                g.groupType,
+                g.totalMemberCount,
+                g.activeMembershipCount,
+                COUNT(DISTINCT gm.USERID) as actualMemberCount,
+                COUNT(DISTINCT rtp.roleId) as roleTargetCount
+            FROM sap_sf_audit_Groups g
+            LEFT JOIN sap_sf_audit_GroupMembers gm 
+                ON gm.GROUPID = g.groupID AND gm.auditRunID_ID = ?
+            LEFT JOIN sap_sf_audit_RoleTargetPopulations rtp 
+                ON rtp.groupId = g.groupID AND rtp.auditRunID_ID = ?
+            WHERE g.auditRunID_ID = ?
+            GROUP BY g.groupID, g.groupName, g.groupType, g.totalMemberCount, g.activeMembershipCount
+            ORDER BY g.totalMemberCount DESC
+            LIMIT ? OFFSET ?
+        `, [auditRunID, auditRunID, auditRunID, top, skip]);
 
-        try {
+        return groups.map(g => ({
+            groupID: g.GROUPID,
+            groupName: g.GROUPNAME,
+            groupType: g.GROUPTYPE,
+            totalMemberCount: Number(g.TOTALMEMBERCOUNT || 0),
+            actualMemberCount: Number(g.ACTUALMEMBERCOUNT || 0),
+            roleTargetCount: Number(g.ROLETARGETCOUNT || 0)
+        }));
 
-            const groups = await tx.run(`
-                SELECT 
-                    g.groupID,
-                    g.groupName,
-                    g.groupType,
-                    g.totalMemberCount,
-                    COUNT(DISTINCT gm.user_ID) as actualMemberCount,
-                    COUNT(DISTINCT rtp.roleId) as roleTargetCount
-                FROM sap_sf_audit_Groups g
-                LEFT JOIN sap_sf_audit_GroupMembers gm 
-                    ON gm.group_ID = g.ID AND gm.auditRunID_ID = ?
-                LEFT JOIN sap_sf_audit_RoleTargetPopulations rtp 
-                    ON rtp.groupId = g.groupID AND rtp.auditRunID_ID = ?
-                WHERE g.auditRunID_ID = ?
-                GROUP BY g.ID
-                ORDER BY g.totalMemberCount DESC
-                LIMIT ? OFFSET ?
-            `, [auditRunID, auditRunID, auditRunID, top, skip]);
-
-            return groups.map(g => ({
-                groupID: g.groupID,
-                groupName: g.groupName,
-                groupType: g.groupType,
-                totalMemberCount: Number(g.totalMemberCount || 0),
-                actualMemberCount: Number(g.actualMemberCount || 0),
-                roleTargetCount: Number(g.roleTargetCount || 0)
-            }));
-
-        } catch (error) {
-            req.error(500, error.message);
-        }
+    } catch (error) {
+        console.error('getGroupDetails error:', error.message);
+        req.error(500, error.message);
     }
+}
 
     // ============================
     // USER ACCESS ANALYSIS

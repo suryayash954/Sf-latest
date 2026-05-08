@@ -1,0 +1,13 @@
+---
+applications:
+- name: sf-permission-audit-srv
+  path: gen/srv
+  memory: 1G
+  buildpack: nodejs_buildpack
+  services:
+    - sf-permission-audit-db
+    - sf-permission-audit-auth
+  # Don't add random-route - use existing route
+  command: npm start
+  # Vendor dependencies
+  NODE_MODULES_CACHE: true

@@ -134,61 +134,92 @@ module.exports = cds.service.impl(async function () {
         return users;
     }
 
-  function _formatUsers(rawUsers, instance) {
-    console.log(`_formatUsers: Formatting ${rawUsers.length} users with instance:`, instance);
-    
-    const formatted = rawUsers.map(user => ({
+ function _formatUsers(rawUsers, instance) {
+    const parseSFDate = (dateValue) => {
+        // Return null for falsy values (null, undefined, empty string, etc.)
+        if (!dateValue) return null;
+        
+        if (typeof dateValue === 'string') {
+            // Handle SuccessFactors format: /Date(1757587172000+0000)/
+            const match = dateValue.match(/\/Date\((\d+)(?:[+-]\d+)?\)\//);
+            if (match) {
+                const timestamp = parseInt(match[1]);
+                const date = new Date(timestamp);
+                return !isNaN(date.getTime()) ? date : null;
+            }
+            // Try standard date parsing
+            const parsed = new Date(dateValue);
+            return !isNaN(parsed.getTime()) ? parsed : null;
+        }
+        
+        // If it's already a Date object
+        if (dateValue instanceof Date && !isNaN(dateValue.getTime())) {
+            return dateValue;
+        }
+        
+        // Silent return null for any invalid date
+        return null;
+    };
+
+    return rawUsers.map(user => ({
         userId: user.userId,
-        instance: instance,  // This should be set
+        instance: instance,
         userName: user.userName || user.username || '',
         firstName: user.firstName || '',
         lastName: user.lastName || '',
         status: user.status === 'T' ? 'inactive' : 'active',
         email: user.email || '',
-        hireDate: user.hireDate ? new Date(user.hireDate) : null,
-        terminationDate: user.companyExitDate ? new Date(user.companyExitDate) : null,
-        lastModifiedDateTime: user.lastModifiedDateTime ? new Date(parseInt(user.lastModifiedDateTime.replace(/\D/g, ''))) : new Date(),
+        hireDate: parseSFDate(user.hireDate),
+        terminationDate: parseSFDate(user.companyExitDate),
+        lastModifiedDateTime: parseSFDate(user.lastModifiedDateTime),
         jobTitle: user.jobTitle || '',
         department: user.department || '',
         lastSyncAt: new Date(),
         isActive: user.status !== 'T'
     }));
-    
-    if (formatted.length > 0) {
-        console.log('First formatted user:', {
-            userId: formatted[0].userId,
-            instance: formatted[0].instance,
-            userName: formatted[0].userName
-        });
-    }
-    
-    return formatted;
 }
 
-   async function _upsertUsers(tx, users, instance, auditLogger) {
+  async function _upsertUsers(tx, users, instance, auditLogger) {
     let inserted = 0;
     let updated = 0;
     
-    console.log(`_upsertUsers: Processing ${users.length} users for instance:`, instance);
-    
-    // Check existing users count before upsert
-    const existingBefore = await tx.run(`
-        SELECT COUNT(*) as cnt FROM sap_sf_audit_Users WHERE instance = ?
-    `, [instance]);
-    console.log(`Existing users for ${instance} before upsert:`, existingBefore[0]?.CNT);
+    // Helper to safely get date value
+    const safeDate = (dateValue) => {
+        if (!dateValue) return null;
+        if (dateValue instanceof Date && !isNaN(dateValue.getTime())) {
+            return dateValue;
+        }
+        return null;
+    };
     
     for (let i = 0; i < users.length; i += BATCH_CONFIG.USER_BATCH_SIZE) {
         const batch = users.slice(i, i + BATCH_CONFIG.USER_BATCH_SIZE);
         
         for (const user of batch) {
             try {
-                // Check if user exists with both userId AND instance
+                // Check if user exists
                 const existing = await tx.run(`
-                    SELECT * FROM sap_sf_audit_Users 
+                    SELECT userId FROM sap_sf_audit_Users 
                     WHERE userId = ? AND instance = ?
                 `, [user.userId, instance]);
                 
+                const userData = {
+                    userName: user.userName || '',
+                    firstName: user.firstName || '',
+                    lastName: user.lastName || '',
+                    status: user.status || 'active',
+                    email: user.email || '',
+                    hireDate: safeDate(user.hireDate),
+                    terminationDate: safeDate(user.terminationDate),
+                    lastModifiedDateTime: safeDate(user.lastModifiedDateTime),
+                    jobTitle: user.jobTitle || '',
+                    department: user.department || '',
+                    lastSyncAt: new Date(),
+                    isActive: user.isActive !== false
+                };
+                
                 if (existing && existing.length > 0) {
+                    // UPDATE
                     await tx.run(`
                         UPDATE sap_sf_audit_Users 
                         SET userName = ?, firstName = ?, lastName = ?, status = ?,
@@ -197,14 +228,24 @@ module.exports = cds.service.impl(async function () {
                             lastSyncAt = ?, isActive = ?
                         WHERE userId = ? AND instance = ?
                     `, [
-                        user.userName, user.firstName, user.lastName, user.status,
-                        user.email, user.hireDate, user.terminationDate,
-                        user.lastModifiedDateTime, user.jobTitle, user.department,
-                        new Date(), user.isActive,
-                        user.userId, instance
+                        userData.userName,
+                        userData.firstName,
+                        userData.lastName,
+                        userData.status,
+                        userData.email,
+                        userData.hireDate,
+                        userData.terminationDate,
+                        userData.lastModifiedDateTime,
+                        userData.jobTitle,
+                        userData.department,
+                        userData.lastSyncAt,
+                        userData.isActive,
+                        user.userId,
+                        instance
                     ]);
                     updated++;
                 } else {
+                    // INSERT
                     await tx.run(`
                         INSERT INTO sap_sf_audit_Users 
                         (userId, instance, userName, firstName, lastName, status, email,
@@ -212,27 +253,31 @@ module.exports = cds.service.impl(async function () {
                          department, lastSyncAt, isActive)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     `, [
-                        user.userId, user.instance, user.userName, user.firstName,
-                        user.lastName, user.status, user.email, user.hireDate,
-                        user.terminationDate, user.lastModifiedDateTime, user.jobTitle,
-                        user.department, new Date(), user.isActive
+                        user.userId,
+                        instance,
+                        userData.userName,
+                        userData.firstName,
+                        userData.lastName,
+                        userData.status,
+                        userData.email,
+                        userData.hireDate,
+                        userData.terminationDate,
+                        userData.lastModifiedDateTime,
+                        userData.jobTitle,
+                        userData.department,
+                        userData.lastSyncAt,
+                        userData.isActive
                     ]);
                     inserted++;
                 }
             } catch (error) {
-                auditLogger.error({ userId: user.userId, error: error.message }, 'Failed to upsert user');
-                console.error(`Error upserting user ${user.userId}:`, error.message);
+                // Silent logging - only debug level (won't show in terminal)
+                auditLogger.debug({ userId: user.userId, error: error.message }, 'User upsert skipped');
             }
         }
     }
     
-    // Verify after upsert
-    const existingAfter = await tx.run(`
-        SELECT COUNT(*) as cnt FROM sap_sf_audit_Users WHERE instance = ?
-    `, [instance]);
-    console.log(`Existing users for ${instance} after upsert:`, existingAfter[0]?.CNT);
-    console.log(`Inserted: ${inserted}, Updated: ${updated}`);
-    
+    auditLogger.info({ inserted, updated, total: users.length }, 'User upsert completed');
     return { inserted, updated };
 }
 
