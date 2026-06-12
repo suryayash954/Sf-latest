@@ -21,6 +21,14 @@ Content-Type: application/json
     "instance": "successfactors"
 }
 
+### Force sync a specific user
+POST http://localhost:4004/SuccessFactorRBPAudit/forceSyncUser
+Content-Type: application/json
+
+{
+    "userId": "sfadmin",
+    "instance": "successfactors"
+}
 ### ============================================
 ### 2. USER MANAGEMENT
 ### ============================================
@@ -32,7 +40,13 @@ Content-Type: application/json
 {
     "instance": "successfactors"
 }
+###
+POST http://localhost:4004/SuccessFactorRBPAudit/batchForceSyncUsers
+Content-Type: application/json
 
+{
+    "instance": "successfactors"
+}
 ### 2.2 Sync users again (should return alreadySynced = true)
 POST {{baseUrl}}/SuccessFactorRBPAudit/syncUsers
 Content-Type: application/json
@@ -146,7 +160,7 @@ POST {{baseUrl}}/SuccessFactorRBPAudit/getAuditStatus
 Content-Type: application/json
 
 {
-    "auditRunID": "c96a86e3-cd38-48c9-bda1-82ce9c1d1df1"
+    "auditRunID": "f833dcc5-1dac-460f-bb65-2b9ff1542d94"
 }
 
 ### 3.6 List all audit runs
@@ -169,6 +183,50 @@ Content-Type: application/json
     "skip": 0
 }
 
+###
+### Get all group members with full details
+GET http://localhost:4004/SuccessFactorRBPReport/getGroupMembersDetails
+Content-Type: application/json
+
+{
+    "auditRunID": "f833dcc5-1dac-460f-bb65-2b9ff1542d94",
+    "top": 20,
+    "skip": 0
+}
+
+### Get members for specific group
+POST http://localhost:4004/SuccessFactorRBPReport/getGroupMembersDetails
+Content-Type: application/json
+
+{
+    "auditRunID": "f833dcc5-1dac-460f-bb65-2b9ff1542d94",
+    "groupID": "1686",
+    "top": 20,
+    "skip": 0
+}
+
+### Filter by department
+POST http://localhost:4004/SuccessFactorRBPReport/getGroupMembersDetails
+Content-Type: application/json
+
+{
+    "auditRunID": "3d6a8f30-d4c9-4dea-b4a6-523a91ead720",
+    "department": "HR",
+    "top": 20,
+    "skip": 0
+}
+
+### Search by specific user
+GET http://localhost:4004/SuccessFactorRBPReport/getGroupMembersDetails
+Content-Type: application/json
+
+{
+    "auditRunID": "3d6a8f30-d4c9-4dea-b4a6-523a91ead720",
+    "userId": "sfadmin",
+    "top": 20,
+    "skip": 0
+}
+
 ### 3.8 Direct OData - Get Audit Runs
 GET {{baseUrl}}/SuccessFactorRBPAudit/AuditRuns?$top=10&$orderby=createdAt desc
 Content-Type: application/json
@@ -178,31 +236,31 @@ Content-Type: application/json
 ### ============================================
 
 ### 4.1 Get Groups for audit run (Replace YOUR_ID)
-GET {{baseUrl}}/SuccessFactorRBPAudit/Groups?$filter=auditRunID_ID eq 'c96a86e3-cd38-48c9-bda1-82ce9c1d1df1'&$top=20
+GET {{baseUrl}}/SuccessFactorRBPAudit/Groups?$filter=auditRunID_ID eq 'f833dcc5-1dac-460f-bb65-2b9ff1542d94'&$top=20
 Content-Type: application/json
 
 ### 4.2 Get Group Members
-GET {{baseUrl}}/SuccessFactorRBPAudit/GroupMembers?$filter=auditRunID_ID eq '23faf2af-8fa0-4b51-b13c-e646a7b000d9'&$top=50
+GET {{baseUrl}}/SuccessFactorRBPAudit/GroupMembers?$filter=auditRunID_ID eq 'f833dcc5-1dac-460f-bb65-2b9ff1542d94'&$top=50
 Content-Type: application/json
 
 ### 4.3 Get Roles (if extracted)
-GET {{baseUrl}}/SuccessFactorRBPAudit/Roles?$filter=auditRunID_ID eq '23faf2af-8fa0-4b51-b13c-e646a7b000d9'&$top=20
+GET {{baseUrl}}/SuccessFactorRBPAudit/Roles?$filter=auditRunID_ID eq 'f833dcc5-1dac-460f-bb65-2b9ff1542d94'&$top=20
 Content-Type: application/json
 
 ### 4.4 Get Role Target Populations
-GET {{baseUrl}}/SuccessFactorRBPAudit/RoleTargetPopulations?$filter=auditRunID_ID eq '23faf2af-8fa0-4b51-b13c-e646a7b000d9'&$top=20
+GET {{baseUrl}}/SuccessFactorRBPAudit/RoleTargetPopulations?$filter=auditRunID_ID eq 'f833dcc5-1dac-460f-bb65-2b9ff1542d94'&$top=20
 Content-Type: application/json
 
 ### 4.5 Get User Role Mappings
-GET {{baseUrl}}/SuccessFactorRBPAudit/UserRoleMappings?$filter=auditRunID_ID eq 'YOUR_ID'&$top=20
+GET {{baseUrl}}/SuccessFactorRBPAudit/UserRoleMappings?$filter=auditRunID_ID eq 'f833dcc5-1dac-460f-bb65-2b9ff1542d94'&$top=20
 Content-Type: application/json
 
 ### 4.6 Get Multi-Group Users (Risk Analysis)
-GET {{baseUrl}}/SuccessFactorRBPAudit/MultiGroupUsers?$filter=auditRunID_ID eq 'YOUR_ID'&$top=20
+GET {{baseUrl}}/SuccessFactorRBPAudit/MultiGroupUsers?$filter=auditRunID_ID eq 'f833dcc5-1dac-460f-bb65-2b9ff1542d94'&$top=20
 Content-Type: application/json
 
 ### 4.7 Get Inactive Users with Access
-GET {{baseUrl}}/SuccessFactorRBPAudit/InactiveUserAccess?$filter=auditRunID_ID eq 'YOUR_ID'&$top=20
+GET {{baseUrl}}/SuccessFactorRBPAudit/InactiveUserAccess?$filter=auditRunID_ID eq 'f833dcc5-1dac-460f-bb65-2b9ff1542d94'&$top=20
 Content-Type: application/json
 
 ### 4.8 Get Group Size Distribution
@@ -395,7 +453,6 @@ Content-Type: application/json
 ### 6.2 Get Users (Reporting)
 GET {{baseUrl}}/SuccessFactorRBPReport/Users?$top=20
 Content-Type: application/json
-
 ### 6.3 Get Roles (Reporting)
 GET {{baseUrl}}/SuccessFactorRBPReport/Roles?$top=20
 Content-Type: application/json

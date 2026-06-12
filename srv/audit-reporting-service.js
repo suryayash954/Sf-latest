@@ -22,6 +22,7 @@ module.exports = cds.service.impl(async function () {
     this.on('getRolesByUser', getRolesByUser);
     this.on('exportAuditData', exportAuditData);
     this.on('exportReport', exportReport);
+    this.on('getGroupMembersDetails', getGroupMembersDetails);
 
     // ============================
     // RISK DASHBOARD
@@ -91,6 +92,136 @@ async function getRiskDashboard(req) {
     }
 }
 
+// ============================
+// GROUP MEMBERS DETAILS (Full User Info)
+// ============================
+async function getGroupMembersDetails(req) {
+    const { 
+        auditRunID, 
+        groupID = null, 
+        userId = null, 
+        department = null, 
+        top = 100, 
+        skip = 0 
+    } = req.data;
+    
+    const tx = cds.transaction(req);
+
+    try {
+        // Build the SQL query
+              let sql = `
+            SELECT 
+                gm.groupID,
+                gm.groupName,
+                g.groupType,                    -- ✅ Get groupType from Groups table
+                gm.userId,
+                gm.userName,
+                u.firstName,
+                u.lastName,
+                u.jobTitle,
+                u.jobCode,
+                u.department,
+                u.division,
+                u.location,
+                u.company,
+                u.businessUnit,
+                u.hireDate,
+                u.email,
+                u.timeZone,
+                u.status
+            FROM sap_sf_audit_GroupMembers gm
+            LEFT JOIN sap_sf_audit_Groups g ON g.groupID = gm.groupID AND g.auditRunID_ID = ?
+            LEFT JOIN sap_sf_audit_Users u ON u.userId = gm.userId
+            WHERE gm.auditRunID_ID = ?
+        `;
+        
+        let params = [auditRunID, auditRunID];
+        
+        // Add filters
+        if (groupID) {
+            sql += ` AND gm.groupID = ?`;
+            params.push(groupID);
+        }
+        
+        if (userId) {
+            sql += ` AND gm.userId = ?`;
+            params.push(userId);
+        }
+        
+        if (department) {
+            sql += ` AND u.department LIKE ?`;
+            params.push(`%${department}%`);
+        }
+        
+        // Add ordering and pagination
+        sql += ` ORDER BY gm.groupName, u.userName LIMIT ? OFFSET ?`;
+        params.push(top, skip);
+        
+        // Execute query
+        const members = await tx.run(sql, params);
+        
+        // Get total count for pagination
+        let countSql = `
+            SELECT COUNT(*) as total
+            FROM sap_sf_audit_GroupMembers gm
+            LEFT JOIN sap_sf_audit_Users u ON u.userId = gm.userId
+            WHERE gm.auditRunID_ID = ?
+        `;
+        let countParams = [auditRunID];
+        
+        if (groupID) {
+            countSql += ` AND gm.groupID = ?`;
+            countParams.push(groupID);
+        }
+        if (userId) {
+            countSql += ` AND gm.userId = ?`;
+            countParams.push(userId);
+        }
+        if (department) {
+            countSql += ` AND u.department LIKE ?`;
+            countParams.push(`%${department}%`);
+        }
+        
+        const countResult = await tx.run(countSql, countParams);
+        const total = Number(countResult[0]?.TOTAL || 0);
+        
+        // Format the response
+        const formattedMembers = members.map(m => ({
+            groupID: m.GROUPID,
+            groupName: m.GROUPNAME,
+            groupType: m.GROUPTYPE,
+            userId: m.USERID,
+            userName: m.USERNAME,
+            firstName: m.FIRSTNAME || '',
+            lastName: m.LASTNAME || '',
+            jobTitle: m.JOBTITLE || '',
+            jobCode: m.JOBCODE || '',
+            department: m.DEPARTMENT || '',
+            division: m.DIVISION || '',
+            location: m.LOCATION || '',
+            company: m.COMPANY || '',
+            businessUnit: m.BUSINESSUNIT || '',
+            hireDate: m.HIREDATE,
+            email: m.EMAIL || '',
+            timeZone: m.TIMEZONE || '',
+            status: m.STATUS || 'active'
+        }));
+        
+        return {
+            value: formattedMembers,
+            pagination: {
+                total: total,
+                top: top,
+                skip: skip
+            }
+        };
+        
+    } catch (error) {
+        console.error('getGroupMembersDetails error:', error.message);
+        req.error(500, error.message);
+        return { value: [], pagination: { total: 0, top: top, skip: skip } };
+    }
+}
     // ============================
     // GROUP DETAILS (OPTIMIZED)
     // ============================
@@ -252,7 +383,7 @@ async function getRiskDashboard(req) {
     // HIGH RISK USERS
     // ============================
 async function getHighRiskUsers(req) {
-    const { auditRunID, minRiskScore = 5, top = 100, skip = 0 } = req.data;
+    const { auditRunID, minRiskScore = 3, top = 100, skip = 0 } = req.data;
     const tx = cds.transaction(req);
     
     try {

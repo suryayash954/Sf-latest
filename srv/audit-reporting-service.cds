@@ -217,6 +217,37 @@ service AuditReportingService @(path: '/SuccessFactorRBPReport') {
         riskLevel: String(20);
     };
     
+     function getGroupMembersDetails(
+        auditRunID: UUID,
+        groupID: String(50) default null,
+        userId: String(100) default null,
+        department: String(255) default null,
+        top: Integer default 100,
+        skip: Integer default 0
+    ) returns array of {
+        // Group fields
+        groupID: String(50);
+        groupName: String(255);
+        groupType: String(50);
+        
+        // User fields (from Users table)
+        userId: String(100);
+        userName: String(255);
+        firstName: String(255);
+        lastName: String(255);
+        jobTitle: String(255);
+        jobCode: String(50);
+        department: String(255);
+        division: String(255);
+        location: String(255);
+        company: String(255);
+        businessUnit: String(255);
+        hireDate: Timestamp;
+        email: String(255);
+        timeZone: String(100);
+        status: String(20);
+    };
+
     /**
      * Get user access analysis - users with most permissions
      */

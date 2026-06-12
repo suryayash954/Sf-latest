@@ -47,7 +47,40 @@ service AuditExecutionService @(path: '/SuccessFactorRBPAudit') {
       timestamp: Timestamp;
     };
   };
+    action forceSyncUser(
+    userId: String(100),
+    instance: String(100)
+  ) returns {
+    success: Boolean;
+    rawUser: {
+      userId: String(100);
+      division: String(255);
+      location: String(255);
+      company: String(255);
+      businessSegment: String(255);
+      jobCode: String(50);
+    };
+    formattedUser: {
+      userId: String(100);
+      jobCode: String(50);
+      division: String(255);
+      location: String(255);
+      company: String(255);
+      businessUnit: String(255);
+    };
+    error: String(255);
+  };
 
+  action batchForceSyncUsers(
+    instance: String(100),
+    batchSize: Integer default 100
+  ) returns {
+    success: Boolean;
+    updated: Integer;
+    failed: Integer;
+    total: Integer;
+    error: String(255);
+  };
   action syncUsersIncremental(
     instance: String(100),
     lastSyncDate: Timestamp

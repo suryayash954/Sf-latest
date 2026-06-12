@@ -103,177 +103,299 @@ module.exports = cds.service.impl(async function () {
         }
     }
 
-    async function _fetchAllUsers(sfConfig, auditLogger) {
-        const users = [];
-        let skip = 0;
-        const top = 1000;
-        let hasMore = true;
+ async function _fetchAllUsers(sfConfig, auditLogger) {
+    const users = [];
+    let skip = 0;
+    const top = 1000;
+    let hasMore = true;
 
-        auditLogger.info('Fetching all users from SuccessFactors');
+    auditLogger.info('Fetching all users from SuccessFactors');
 
-        while (hasMore) {
-            try {
-                const url = `${sfConfig.baseURL}/User?$format=json&$top=${top}&$skip=${skip}`;
-                const response = await axios.get(url, {
-                    auth: sfConfig.auth,
-                    headers: sfConfig.headers,
-                    httpsAgent: sfConfig.httpsAgent
-                });
-                const results = response.data?.d?.results || [];
-                users.push(...results);
-                hasMore = results.length === top;
-                skip += top;
-                auditLogger.debug({ fetched: results.length, total: users.length }, 'Users batch fetched');
-            } catch (error) {
-                auditLogger.error({ error: error.message, skip }, 'Failed to fetch users batch');
-                throw error;
-            }
+    while (hasMore) {
+        try {
+            const url = `${sfConfig.baseURL}/User?$format=json&$top=${top}&$skip=${skip}`;
+            const response = await axios.get(url, {
+                auth: sfConfig.auth,
+                headers: sfConfig.headers,
+                httpsAgent: sfConfig.httpsAgent
+            });
+            
+            const results = response.data?.d?.results || [];
+            users.push(...results);
+            hasMore = results.length === top;
+            skip += top;
+            
+        } catch (error) {
+            auditLogger.error({ error: error.message, skip }, 'Failed to fetch users batch');
+            throw error;
         }
-
-        auditLogger.info({ totalUsers: users.length }, 'All users fetched');
-        return users;
     }
 
+    auditLogger.info({ totalUsers: users.length }, 'All users fetched');
+    return users;
+}
  function _formatUsers(rawUsers, instance) {
     const parseSFDate = (dateValue) => {
-        // Return null for falsy values (null, undefined, empty string, etc.)
         if (!dateValue) return null;
-        
         if (typeof dateValue === 'string') {
-            // Handle SuccessFactors format: /Date(1757587172000+0000)/
             const match = dateValue.match(/\/Date\((\d+)(?:[+-]\d+)?\)\//);
             if (match) {
                 const timestamp = parseInt(match[1]);
                 const date = new Date(timestamp);
                 return !isNaN(date.getTime()) ? date : null;
             }
-            // Try standard date parsing
             const parsed = new Date(dateValue);
             return !isNaN(parsed.getTime()) ? parsed : null;
         }
-        
-        // If it's already a Date object
-        if (dateValue instanceof Date && !isNaN(dateValue.getTime())) {
+        if (dateValue instanceof Date && !isNaN(date.getTime())) {
             return dateValue;
         }
-        
-        // Silent return null for any invalid date
         return null;
     };
+    // In _formatUsers, add this debug
+    if (rawUsers.length > 0 && rawUsers[0].userId === 'sfadmin') {
+        console.log('=== RAW SF USER DATA FOR sfadmin ===');
+        console.log('division:', rawUsers[0].division);
+        console.log('location:', rawUsers[0].location);
+        console.log('company:', rawUsers[0].company);
+        console.log('businessSegment:', rawUsers[0].businessSegment);
+        console.log('jobCode:', rawUsers[0].jobCode);
+        console.log('All keys:', Object.keys(rawUsers[0]));
+    }
 
     return rawUsers.map(user => ({
         userId: user.userId,
         instance: instance,
-        userName: user.userName || user.username || '',
+        userName: user.username || user.userId || '',
         firstName: user.firstName || '',
         lastName: user.lastName || '',
-        status: user.status === 'T' ? 'inactive' : 'active',
+        status: user.status === 't' || user.status === 'T' ? 'inactive' : 'active',
         email: user.email || '',
         hireDate: parseSFDate(user.hireDate),
         terminationDate: parseSFDate(user.companyExitDate),
-        lastModifiedDateTime: parseSFDate(user.lastModifiedDateTime),
-        jobTitle: user.jobTitle || '',
+        lastModifiedDateTime: parseSFDate(user.lastModifiedDateTime) || new Date(),
+        timeZone: user.timeZone || '',
+        
+        // Job & Organization fields - FIX THESE MAPPINGS
+        jobTitle: user.title || user.jobTitle || '',
+        jobCode: user.jobCode || '',                           // ✅ Add this
         department: user.department || '',
+        division: user.division || '',                          // ✅ Add this
+        location: user.location || '',                          // ✅ Add this
+        company: user.company || '',                            // ✅ Add this
+        businessUnit: user.businessSegment || user.businessUnit || '',  // ✅ Add this
+        
+        // Custom fields
+        custom01: user.custom01 || '',
+        custom02: user.custom02 || '',
+        custom03: user.custom03 || '',
+        
+        // Sync metadata
         lastSyncAt: new Date(),
-        isActive: user.status !== 'T'
+        isActive: user.status !== 't' && user.status !== 'T'
     }));
 }
-
-  async function _upsertUsers(tx, users, instance, auditLogger) {
+// Add this action to force re-sync of specific user
+this.on('batchForceSyncUsers', async (req) => {
+    const { instance } = req.data;
+    const tx = cds.transaction(req);
+    
+    try {
+        // Get all users for this instance
+        const users = await tx.run(`
+            SELECT userId FROM sap_sf_audit_Users WHERE instance = ?
+        `, [instance]);
+        
+        console.log(`Found ${users.length} users to force sync`);
+        
+        const sfConfig = await _getSFDestination(instance, logger, req);
+        let updated = 0;
+        let failed = 0;
+        
+        // Helper function to safely convert to HANA TIMESTAMP
+        const toHanaTimestamp = (dateValue) => {
+            if (!dateValue) return null;
+            if (dateValue instanceof Date && !isNaN(dateValue.getTime())) {
+                return dateValue;
+            }
+            if (typeof dateValue === 'string') {
+                const match = dateValue.match(/\/Date\((\d+)(?:[+-]\d+)?\)\//);
+                if (match) {
+                    const timestamp = parseInt(match[1]);
+                    const date = new Date(timestamp);
+                    return !isNaN(date.getTime()) ? date : null;
+                }
+                const parsed = new Date(dateValue);
+                return !isNaN(parsed.getTime()) ? parsed : null;
+            }
+            return null;
+        };
+        
+        for (let i = 0; i < users.length; i++) {
+            const user = users[i];
+            
+            try {
+                // Fetch from SF
+                const url = `${sfConfig.baseURL}/User?$format=json&$filter=userId eq '${user.USERID}'`;
+                const response = await axios.get(url, {
+                    auth: sfConfig.auth,
+                    headers: sfConfig.headers
+                });
+                
+                const rawUser = response.data?.d?.results?.[0];
+                if (rawUser) {
+                    const formatted = _formatUsers([rawUser], instance)[0];
+                    
+                    // Convert date properly
+                    const lastModifiedDateTime = toHanaTimestamp(formatted.lastModifiedDateTime);
+                    
+                    await tx.run(`
+                        UPDATE sap_sf_audit_Users 
+                        SET jobCode = ?, 
+                            division = ?, 
+                            location = ?,
+                            jobTitle = ?,
+                            department = ?,
+                            timeZone = ?,
+                            lastSyncAt = CURRENT_TIMESTAMP
+                        WHERE userId = ? AND instance = ?
+                    `, [
+                        formatted.jobCode || '',
+                        formatted.division || '',
+                        formatted.location || '',
+                        formatted.jobTitle || '',
+                        formatted.department || '',
+                        formatted.timeZone || '',
+                        user.USERID,
+                        instance
+                    ]);
+                    updated++;
+                    
+                    if (updated % 100 === 0) {
+                        console.log(`Updated ${updated} users...`);
+                        await tx.commit();
+                        await tx.begin();
+                    }
+                } else {
+                    failed++;
+                }
+            } catch (error) {
+                console.error(`Failed to update ${user.USERID}:`, error.message);
+                failed++;
+            }
+        }
+        
+        await tx.commit();
+        console.log(`Batch complete - Updated: ${updated}, Failed: ${failed}`);
+        
+        return { success: true, updated, failed, total: users.length };
+        
+    } catch (error) {
+        await tx.rollback();
+        return { success: false, error: error.message };
+    }
+});
+this.on('forceSyncUser', async (req) => {
+    const { userId, instance } = req.data;
+    const tx = cds.transaction(req);
+    
+    try {
+        const sfConfig = await _getSFDestination(instance, logger, req);
+        
+        // Fetch specific user
+        const response = await axios.get(`${sfConfig.baseURL}/User?$format=json&$filter=userId eq '${userId}'`, {
+            auth: sfConfig.auth,
+            headers: sfConfig.headers
+        });
+        
+        const rawUser = response.data?.d?.results?.[0];
+        console.log('Raw user data:', JSON.stringify(rawUser, null, 2));
+        
+        const formattedUser = _formatUsers([rawUser], instance)[0];
+        console.log('Formatted user:', JSON.stringify(formattedUser, null, 2));
+        
+        // Update in database
+        await tx.run(`
+            UPDATE sap_sf_audit_Users 
+            SET jobCode = ?, division = ?, location = ?, 
+                company = ?, businessUnit = ?
+            WHERE userId = ? AND instance = ?
+        `, [
+            formattedUser.jobCode,
+            formattedUser.division,
+            formattedUser.location,
+            formattedUser.company,
+            formattedUser.businessUnit,
+            userId,
+            instance
+        ]);
+        
+        await tx.commit();
+        
+        return { success: true, rawUser, formattedUser };
+    } catch (error) {
+        await tx.rollback();
+        return { error: error.message };
+    }
+});
+async function _upsertUsers(tx, users, instance, auditLogger) {
     let inserted = 0;
     let updated = 0;
     
-    // Helper to safely get date value
-    const safeDate = (dateValue) => {
+    // Helper function to safely convert to HANA TIMESTAMP
+    const toHanaTimestamp = (dateValue) => {
         if (!dateValue) return null;
         if (dateValue instanceof Date && !isNaN(dateValue.getTime())) {
             return dateValue;
         }
+        if (typeof dateValue === 'string') {
+            const match = dateValue.match(/\/Date\((\d+)(?:[+-]\d+)?\)\//);
+            if (match) {
+                const timestamp = parseInt(match[1]);
+                const date = new Date(timestamp);
+                return !isNaN(date.getTime()) ? date : null;
+            }
+            const parsed = new Date(dateValue);
+            return !isNaN(parsed.getTime()) ? parsed : null;
+        }
         return null;
     };
     
-    for (let i = 0; i < users.length; i += BATCH_CONFIG.USER_BATCH_SIZE) {
-        const batch = users.slice(i, i + BATCH_CONFIG.USER_BATCH_SIZE);
+    for (let i = 0; i < users.length; i++) {
+        const user = users[i];
         
-        for (const user of batch) {
-            try {
-                // Check if user exists
-                const existing = await tx.run(`
-                    SELECT userId FROM sap_sf_audit_Users 
-                    WHERE userId = ? AND instance = ?
-                `, [user.userId, instance]);
-                
-                const userData = {
-                    userName: user.userName || '',
-                    firstName: user.firstName || '',
-                    lastName: user.lastName || '',
-                    status: user.status || 'active',
-                    email: user.email || '',
-                    hireDate: safeDate(user.hireDate),
-                    terminationDate: safeDate(user.terminationDate),
-                    lastModifiedDateTime: safeDate(user.lastModifiedDateTime),
-                    jobTitle: user.jobTitle || '',
-                    department: user.department || '',
-                    lastSyncAt: new Date(),
-                    isActive: user.isActive !== false
-                };
-                
-                if (existing && existing.length > 0) {
-                    // UPDATE
-                    await tx.run(`
-                        UPDATE sap_sf_audit_Users 
-                        SET userName = ?, firstName = ?, lastName = ?, status = ?,
-                            email = ?, hireDate = ?, terminationDate = ?,
-                            lastModifiedDateTime = ?, jobTitle = ?, department = ?,
-                            lastSyncAt = ?, isActive = ?
-                        WHERE userId = ? AND instance = ?
-                    `, [
-                        userData.userName,
-                        userData.firstName,
-                        userData.lastName,
-                        userData.status,
-                        userData.email,
-                        userData.hireDate,
-                        userData.terminationDate,
-                        userData.lastModifiedDateTime,
-                        userData.jobTitle,
-                        userData.department,
-                        userData.lastSyncAt,
-                        userData.isActive,
-                        user.userId,
-                        instance
-                    ]);
-                    updated++;
-                } else {
-                    // INSERT
-                    await tx.run(`
-                        INSERT INTO sap_sf_audit_Users 
-                        (userId, instance, userName, firstName, lastName, status, email,
-                         hireDate, terminationDate, lastModifiedDateTime, jobTitle,
-                         department, lastSyncAt, isActive)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    `, [
-                        user.userId,
-                        instance,
-                        userData.userName,
-                        userData.firstName,
-                        userData.lastName,
-                        userData.status,
-                        userData.email,
-                        userData.hireDate,
-                        userData.terminationDate,
-                        userData.lastModifiedDateTime,
-                        userData.jobTitle,
-                        userData.department,
-                        userData.lastSyncAt,
-                        userData.isActive
-                    ]);
-                    inserted++;
-                }
-            } catch (error) {
-                // Silent logging - only debug level (won't show in terminal)
-                auditLogger.debug({ userId: user.userId, error: error.message }, 'User upsert skipped');
-            }
+        try {
+            // Convert dates safely - null will be treated as NULL in HANA
+            const hireDate = toHanaTimestamp(user.hireDate);
+            const terminationDate = toHanaTimestamp(user.terminationDate);
+            const lastModifiedDateTime = toHanaTimestamp(user.lastModifiedDateTime) || new Date();
+            
+            await tx.run(`
+                INSERT INTO "SAP_SF_AUDIT_USERS" 
+                ("USERID", "INSTANCE", "USERNAME", "FIRSTNAME", "LASTNAME", 
+                 "STATUS", "EMAIL", "HIREDATE", "TERMINATIONDATE", 
+                 "LASTMODIFIEDDATETIME", "JOBTITLE", "DEPARTMENT", 
+                 "LASTSYNCAT", "ISACTIVE")
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+            `, [
+                user.userId,
+                instance,
+                user.userName,
+                user.firstName,
+                user.lastName,
+                user.status,
+                user.email,
+                hireDate,
+                terminationDate,
+                lastModifiedDateTime,
+                user.jobTitle,
+                user.department,
+                user.isActive !== false ? true : false
+            ]);
+            inserted++;
+            
+        } catch (error) {
+            auditLogger.error({ userId: user.userId, error: error.message }, 'Failed to insert user');
         }
     }
     
@@ -877,25 +999,25 @@ module.exports = cds.service.impl(async function () {
                     COUNT(*) AS groupCount,
                     STRING_AGG(groupName, ', ') AS groupNames,
                     CASE 
-                        WHEN COUNT(*) >= 10 THEN 'High'
-                        WHEN COUNT(*) >= 5 THEN 'Medium'
+                        WHEN COUNT(*) >= 5 THEN 'High'
+                        WHEN COUNT(*) >= 2 THEN 'Medium'
                         ELSE 'Low'
                     END AS riskLevel,
                     COUNT(*) AS riskScore,
                     CASE 
-                        WHEN COUNT(*) >= 10 THEN 'Critical'
-                        WHEN COUNT(*) >= 5 THEN 'Elevated'
+                        WHEN COUNT(*) >= 5 THEN 'Critical'
+                        WHEN COUNT(*) >= 2 THEN 'Elevated'
                         ELSE 'Normal'
                     END AS riskCategory,
                     CASE 
-                        WHEN COUNT(*) >= 10 THEN 'Immediate review required'
-                        WHEN COUNT(*) >= 5 THEN 'Review access'
+                        WHEN COUNT(*) >= 5 THEN 'Immediate review required'
+                        WHEN COUNT(*) >= 2 THEN 'Review access'
                         ELSE 'Monitor'
                     END AS recommendedAction
                 FROM sap_sf_audit_GroupMembers
                 WHERE auditRunID_ID = ?
                 GROUP BY userId
-                HAVING COUNT(*) >= 5
+                HAVING COUNT(*) >= 2
             `, [uuidv4(), auditRunID, auditRunID]);
             auditLogger.info('Multi-group users populated');
         } catch (error) {
@@ -1074,7 +1196,7 @@ module.exports = cds.service.impl(async function () {
         }
     });
 
-  this.on('syncUsers', async (req) => {
+ this.on('syncUsers', async (req) => {
     const { instance } = req.data;
     const syncLogger = logger.child({ operation: 'SYNC_USERS', instance });
     
@@ -1086,51 +1208,16 @@ module.exports = cds.service.impl(async function () {
     const tx = cds.transaction(req);
     
     try {
-        console.log('=== DEBUG: syncUsers ===');
-        console.log('Instance:', instance);
-        
-        // STEP 1: Check total users in the table (without any filter)
-        const totalAllUsers = await tx.run(`
-            SELECT COUNT(*) as total FROM sap_sf_audit_Users
-        `);
-        console.log('Total users in Users table (all instances):', totalAllUsers[0]?.TOTAL);
-        
-        // STEP 2: Check users for this specific instance
+        // Check if users already exist for this instance
         const existingUserCount = await tx.run(`
-            SELECT COUNT(*) as count FROM sap_sf_audit_Users WHERE instance = ?
+            SELECT COUNT(*) as count FROM "SAP_SF_AUDIT_USERS" WHERE "INSTANCE" = ?
         `, [instance]);
         
         const userCount = Number(existingUserCount[0]?.COUNT || 0);
-        console.log(`Users for instance '${instance}':`, userCount);
-        
-        // STEP 3: Check what instances exist in the Users table
-        const distinctInstances = await tx.run(`
-            SELECT DISTINCT instance, COUNT(*) as count 
-            FROM sap_sf_audit_Users 
-            GROUP BY instance
-        `);
-        console.log('Distinct instances in Users table:', distinctInstances);
-        
-        // STEP 4: Check if there are any users with NULL instance
-        const nullInstanceUsers = await tx.run(`
-            SELECT COUNT(*) as count FROM sap_sf_audit_Users WHERE instance IS NULL
-        `);
-        console.log('Users with NULL instance:', nullInstanceUsers[0]?.COUNT);
-        
-        // STEP 5: Try to get a sample user to verify data
-        const sampleUser = await tx.run(`
-            SELECT userId, instance, userName FROM sap_sf_audit_Users LIMIT 1
-        `);
-        console.log('Sample user from table:', sampleUser[0]);
-        
-        // STEP 6: Check if _formatUsers is setting instance correctly
-        // This will be checked when we fetch from SF
         
         if (userCount > 0) {
             await tx.commit();
             syncLogger.info({ userCount }, 'Users already synced for this instance');
-            console.log('✅ Users already exist - returning without syncing');
-            
             return {
                 success: true,
                 message: `Users already synced for instance '${instance}'. ${userCount} users exist.`,
@@ -1145,28 +1232,17 @@ module.exports = cds.service.impl(async function () {
             };
         }
         
-        // STEP 7: No users found - proceed with sync
-        console.log('⚠️ No users found for this instance - starting full sync');
         syncLogger.info('No users found, fetching from SuccessFactors');
         
         const sfConfig = await _getSFDestination(instance, syncLogger, req);
         const rawUsers = await _fetchAllUsers(sfConfig, syncLogger);
-        
-        console.log(`Fetched ${rawUsers.length} users from SuccessFactors`);
-        console.log('First user sample:', rawUsers[0] ? {
-            userId: rawUsers[0].userId,
-            userName: rawUsers[0].userName
-        } : 'No users');
-        
         const users = _formatUsers(rawUsers, instance);
-        console.log(`Formatted ${users.length} users with instance:`, users[0]?.instance);
         
         const stats = await _upsertUsers(tx, users, instance, syncLogger);
         
         await tx.commit();
         
-        console.log('✅ User sync completed successfully');
-        console.log(`Inserted: ${stats.inserted}, Updated: ${stats.updated}`);
+        syncLogger.info({ inserted: stats.inserted, updated: stats.updated }, 'User sync completed');
         
         return {
             success: true,
@@ -1182,7 +1258,6 @@ module.exports = cds.service.impl(async function () {
         };
         
     } catch (error) {
-        console.error('❌ syncUsers error:', error);
         syncLogger.error({ error: error.message }, 'User sync failed');
         await tx.rollback();
         req.error(500, `User sync failed: ${error.message}`);
