@@ -47,10 +47,10 @@ module.exports = cds.service.impl(async function () {
         if (isLocal) {
             auditLogger.info('LOCAL MODE: Using hardcoded SF configuration');
             return {
-                baseURL: 'https://api68sales.successfactors.com/odata/v2',
+                baseURL: 'https://apisalesdemo2.successfactors.eu/odata/v2',
                 auth: {
-                    username: 'igrant@SFSALES010236',
-                    password: 'AIdemo@24'
+                    username: 'sfadmin@SFCPART002553',
+                    password: 'Yash@123'
                 },
                 headers: {
                     'Accept': 'application/json',
@@ -338,69 +338,135 @@ this.on('forceSyncUser', async (req) => {
         return { error: error.message };
     }
 });
+
 async function _upsertUsers(tx, users, instance, auditLogger) {
     let inserted = 0;
     let updated = 0;
-    
-    // Helper function to safely convert to HANA TIMESTAMP
-    const toHanaTimestamp = (dateValue) => {
-        if (!dateValue) return null;
-        if (dateValue instanceof Date && !isNaN(dateValue.getTime())) {
-            return dateValue;
-        }
-        if (typeof dateValue === 'string') {
-            const match = dateValue.match(/\/Date\((\d+)(?:[+-]\d+)?\)\//);
+
+    // Convert any date value to HANA TIMESTAMP format
+    const hanaTimestamp = (value) => {
+        if (!value) return null;
+
+        let d;
+
+        if (value instanceof Date) {
+            d = value;
+        } else if (typeof value === 'string') {
+            const match = value.match(/\/Date\((\d+)(?:[+-]\d+)?\)\//);
+
             if (match) {
-                const timestamp = parseInt(match[1]);
-                const date = new Date(timestamp);
-                return !isNaN(date.getTime()) ? date : null;
+                d = new Date(Number(match[1]));
+            } else {
+                d = new Date(value);
             }
-            const parsed = new Date(dateValue);
-            return !isNaN(parsed.getTime()) ? parsed : null;
+        } else {
+            return null;
         }
-        return null;
+
+        if (isNaN(d.getTime())) {
+            return null;
+        }
+
+        const pad = (n) => String(n).padStart(2, '0');
+
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     };
-    
-    for (let i = 0; i < users.length; i++) {
-        const user = users[i];
-        
+
+    for (const user of users) {
         try {
-            // Convert dates safely - null will be treated as NULL in HANA
-            const hireDate = toHanaTimestamp(user.hireDate);
-            const terminationDate = toHanaTimestamp(user.terminationDate);
-            const lastModifiedDateTime = toHanaTimestamp(user.lastModifiedDateTime) || new Date();
-            
+
+            const hireDate = hanaTimestamp(user.hireDate);
+
+            const terminationDate = hanaTimestamp(
+                user.terminationDate
+            );
+
+            const lastModifiedDateTime =
+                hanaTimestamp(user.lastModifiedDateTime) ||
+                hanaTimestamp(new Date());
+
             await tx.run(`
-                INSERT INTO "SAP_SF_AUDIT_USERS" 
-                ("USERID", "INSTANCE", "USERNAME", "FIRSTNAME", "LASTNAME", 
-                 "STATUS", "EMAIL", "HIREDATE", "TERMINATIONDATE", 
-                 "LASTMODIFIEDDATETIME", "JOBTITLE", "DEPARTMENT", 
-                 "LASTSYNCAT", "ISACTIVE")
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+                INSERT INTO "SAP_SF_AUDIT_USERS"
+                (
+                    "USERID",
+                    "INSTANCE",
+                    "USERNAME",
+                    "FIRSTNAME",
+                    "LASTNAME",
+                    "STATUS",
+                    "EMAIL",
+                    "HIREDATE",
+                    "TERMINATIONDATE",
+                    "LASTMODIFIEDDATETIME",
+                    "JOBTITLE",
+                    "JOBCODE",
+                    "DEPARTMENT",
+                    "DIVISION",
+                    "LOCATION",
+                    "COMPANY",
+                    "BUSINESSUNIT",
+                    "TIMEZONE",
+                    "CUSTOM01",
+                    "CUSTOM02",
+                    "CUSTOM03",
+                    "LASTSYNCAT",
+                    "ISACTIVE"
+                )
+                VALUES
+                (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    CURRENT_TIMESTAMP,
+                    ?
+                )
             `, [
                 user.userId,
                 instance,
-                user.userName,
-                user.firstName,
-                user.lastName,
-                user.status,
-                user.email,
+                user.userName || '',
+                user.firstName || '',
+                user.lastName || '',
+                user.status || 'active',
+                user.email || '',
                 hireDate,
                 terminationDate,
                 lastModifiedDateTime,
-                user.jobTitle,
-                user.department,
-                user.isActive !== false ? true : false
+                user.jobTitle || '',
+                user.jobCode || '',
+                user.department || '',
+                user.division || '',
+                user.location || '',
+                user.company || '',
+                user.businessUnit || '',
+                user.timeZone || '',
+                user.custom01 || '',
+                user.custom02 || '',
+                user.custom03 || '',
+                user.isActive !== false
             ]);
+
             inserted++;
-            
+
         } catch (error) {
-            auditLogger.error({ userId: user.userId, error: error.message }, 'Failed to insert user');
+
+            auditLogger.error({
+                userId: user.userId,
+                hireDate: user.hireDate,
+                terminationDate: user.terminationDate,
+                lastModifiedDateTime: user.lastModifiedDateTime,
+                error: error.message
+            }, 'Failed to insert user');
         }
     }
-    
-    auditLogger.info({ inserted, updated, total: users.length }, 'User upsert completed');
-    return { inserted, updated };
+
+    auditLogger.info({
+        inserted,
+        updated,
+        total: users.length
+    }, 'User upsert completed');
+
+    return {
+        inserted,
+        updated
+    };
 }
 
     async function _fetchUsersModifiedAfter(sfConfig, lastSyncTimestamp, auditLogger) {
@@ -607,76 +673,64 @@ async function _upsertUsers(tx, users, instance, auditLogger) {
         `, [auditRunID, auditRunID]);
     }
 
-  async function _fetchRolesWithPagination(sfConfig, auditLogger) {
-    const roles = [];
-    let skip = 0;
-    const top = 100;
-    let hasMore = true;
-
-    // Use RoleEntity instead of RBPRole
-    const entityName = 'RoleEntity';
-    
-    while (hasMore) {
-        try {
-            const url = `${sfConfig.baseURL}/${entityName}?$format=json&$top=${top}&$skip=${skip}`;
-            
-            const response = await axios.get(url, {
-                auth: sfConfig.auth,
-                headers: sfConfig.headers,
-                httpsAgent: sfConfig.httpsAgent,
-                timeout: sfConfig.timeout
-            });
-
-            const results = response.data?.d?.results || [];
-            roles.push(...results);
-            hasMore = results.length === top;
-            skip += top;
-            
-            auditLogger.info({ fetched: results.length, total: roles.length }, 'Roles batch fetched');
-
-        } catch (error) {
-            auditLogger.error({ error: error.message, skip, entityName }, 'Failed to fetch roles batch');
-            throw error;
-        }
-    }
-    
-    auditLogger.info({ totalRoles: roles.length }, 'All roles fetched');
-    return roles;
+async function _fetchRolesWithPagination(sfConfig, auditLogger) {
+   const roles = [];
+   let skip = 0;
+   const top = 100;
+   let hasMore = true;
+   // ✅ Use RBPRole (confirmed working)
+   const entityName = 'RBPRole';
+auditLogger.info({ entityName }, 'Fetching roles from SuccessFactors');
+   while (hasMore) {
+       try {
+           const url = `${sfConfig.baseURL}/${entityName}?$format=json&$top=${top}&$skip=${skip}`;
+           const response = await axios.get(url, {
+               auth: sfConfig.auth,
+               headers: sfConfig.headers,
+               httpsAgent: sfConfig.httpsAgent,
+               timeout: sfConfig.timeout
+           });
+           const results = response.data?.d?.results || [];
+           roles.push(...results);
+           hasMore = results.length === top;
+           skip += top;
+auditLogger.info({ fetched: results.length, total: roles.length }, 'Roles batch fetched');
+       } catch (error) {
+           auditLogger.error({ error: error.message }, 'Failed to fetch roles');
+           throw error;
+       }
+   }
+auditLogger.info({ totalRoles: roles.length }, 'All roles fetched');
+   return roles;
 }
-            async function _saveRoles(tx, auditRunID, roles, auditLogger) {
-                if (!roles.length) return;
-
-            const parseSFDate = (dateValue) => {
-                if (!dateValue) return null;
-                if (typeof dateValue === 'string') {
-                    const match = dateValue.match(/\/Date\((\d+)\)\//);
-                    if (match) return new Date(parseInt(match[1]));
-                }
-                return dateValue instanceof Date ? dateValue : null;
-            };
-
-            const entries = roles.map(r => ({
-                ID: uuidv4(),
-                auditRunID_ID: auditRunID,
-                
-                // Map RoleEntity fields to existing Roles entity fields
-                roleId: r.externalCode || r.roleId,                    // externalCode → roleId
-                roleName: r.name_en_US || r.name_defaultValue || r.roleName,  // name_en_US → roleName
-                roleDesc: r.description || '',                          // description → roleDesc (if available)
-                roleType: 'MDF',                                        // Mark as MDF role type
-                userType: 'user',                                       // Default user type
-                lastModifiedBy: r.lastModifiedBy || '',                 // lastModifiedBy → lastModifiedBy
-                lastModifiedDate: parseSFDate(r.lastModifiedDate)       // lastModifiedDate → lastModifiedDate
-            }));
-
-            const batchSize = 500;
-            for (let i = 0; i < entries.length; i += batchSize) {
-                const batch = entries.slice(i, i + batchSize);
-                await tx.run(INSERT.into('Roles').entries(batch));
-            }
-            
-            auditLogger.info({ count: entries.length }, 'Roles saved from RoleEntity');
-        }
+         async function _saveRoles(tx, auditRunID, roles, auditLogger) {
+   if (!roles.length) return;
+   const parseSFDate = (dateValue) => {
+       if (!dateValue) return null;
+       if (typeof dateValue === 'string') {
+           const match = dateValue.match(/\/Date\((\d+)\)\//);
+           if (match) return new Date(parseInt(match[1]));
+       }
+       return dateValue instanceof Date ? dateValue : null;
+   };
+   const entries = roles.map(r => ({
+       ID: uuidv4(),
+       auditRunID_ID: auditRunID,
+       roleId: r.roleId || '',                    // ✅ RBPRole uses roleId
+       roleName: r.roleName || '',                // ✅ RBPRole uses roleName
+       roleDesc: r.roleDesc || '',                // ✅ RBPRole uses roleDesc
+       roleType: r.roleType || 'standard',
+       userType: r.userType || 'user',            // ✅ RBPRole has userType
+       lastModifiedBy: r.lastModifiedBy || '',    // ✅ RBPRole has lastModifiedBy
+       lastModifiedDate: parseSFDate(r.lastModifiedDate)  // ✅ RBPRole has lastModifiedDate
+   }));
+   const batchSize = 500;
+   for (let i = 0; i < entries.length; i += batchSize) {
+       const batch = entries.slice(i, i + batchSize);
+       await tx.run(INSERT.into('Roles').entries(batch));
+   }
+auditLogger.info({ count: entries.length }, 'Roles saved from RBPRole');
+}
     async function _generateAnalytics(tx, auditRunID, auditLogger) {
         try {
             await tx.run(`
@@ -717,101 +771,182 @@ async function _upsertUsers(tx, users, instance, auditLogger) {
         }
     }
 
-   async function _populateRoleTargetsAndUnusedRoles(tx, auditRunID, sfConfig, auditLogger) {
-    try {
-        auditLogger.info('Populating role target populations');
-
-        await tx.run(DELETE.from('RoleTargetPopulations').where({ auditRunID_ID: auditRunID }));
-        await tx.run(DELETE.from('UnusedRoles').where({ auditRunID_ID: auditRunID }));
-
-        const groups = await tx.run(
-            SELECT.from('Groups').where({ auditRunID_ID: auditRunID })
-        );
-
-        if (!groups.length) {
-            auditLogger.warn('No groups found, skipping role targets');
-            return;
-        }
-
-        // For each group, try to fetch role targets
-        for (const group of groups) {
-            try {
-                const roleTargetEndpoints = [
-                    `${sfConfig.baseURL}/DynamicGroup('${group.groupID}')/roleTargets?$format=json`,
-                    `${sfConfig.baseURL}/RBPRule?$filter=groupId eq '${group.groupID}'&$format=json`,
-                    `${sfConfig.baseURL}/getRoleTargetsByGroup?groupId=${group.groupID}&$format=json`
-                ];
-
-                for (const url of roleTargetEndpoints) {
-                    try {
-                        const response = await axios.get(url, {
-                            auth: sfConfig.auth,
-                            headers: sfConfig.headers,
-                            httpsAgent: sfConfig.httpsAgent,
-                            timeout: 10000
-                        });
-
-                        const targets = response.data?.d?.results || [];
-                        if (targets.length > 0) {
-                            auditLogger.debug({ groupId: group.groupID, count: targets.length }, 'Found role targets');
-
-                            for (const target of targets) {
-                                await tx.run(`
-                                    INSERT INTO sap_sf_audit_RoleTargetPopulations (
-                                        ID, auditRunID_ID, roleId, roleName, groupId, groupName,
-                                        source, ruleId, ruleMyFilter
-                                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                `, [
-                                    uuidv4(), auditRunID,
-                                    target.roleId || target.id,
-                                    target.roleName || target.name,
-                                    group.groupID, group.groupName,
-                                    'api_fetch',
-                                    target.ruleId || '',
-                                    target.ruleMyFilter || ''
-                                ]);
-                            }
-                            break;
-                        }
-                    } catch (e) {
-                        auditLogger.debug({ groupId: group.groupID, url }, 'Endpoint failed');
-                    }
-                }
-            } catch (error) {
-                auditLogger.debug({ groupId: group.groupID }, 'No role targets found for group');
-            }
-        }
-
-        // Get used role IDs using raw SQL (avoid CAP distinct issue)
-        const rolesWithTargets = await tx.run(`
-            SELECT DISTINCT roleId 
-            FROM sap_sf_audit_RoleTargetPopulations 
-            WHERE auditRunID_ID = ?
-        `, [auditRunID]);
-        
-        const usedRoleIds = new Set(rolesWithTargets.map(r => r.ROLEID));
-
-        const roles = await tx.run(
-            SELECT.from('Roles').where({ auditRunID_ID: auditRunID })
-        );
-
-        for (const role of roles) {
-            if (!usedRoleIds.has(role.roleId)) {
-                await tx.run(`
-                    INSERT INTO sap_sf_audit_UnusedRoles (
-                        ID, auditRunID_ID, roleId, roleName, roleType, recommendation
-                    ) VALUES (?, ?, ?, ?, ?, ?)
-                `, [
-                    uuidv4(), auditRunID, role.roleId, role.roleName,
-                    role.roleType || 'standard', 'Review / Decommission'
-                ]);
-            }
-        }
-
-        auditLogger.info('Role targets and unused roles populated');
-    } catch (error) {
-        auditLogger.error({ error: error.message }, 'Failed to populate role targets');
-    }
+async function _populateRoleTargetsAndUnusedRoles(tx, auditRunID, sfConfig, auditLogger) {
+   try {
+auditLogger.info('=== Starting _populateRoleTargetsAndUnusedRoles ===');
+       // STEP 1: Delete existing
+       await tx.run(DELETE.from('RoleTargetPopulations').where({ auditRunID_ID: auditRunID }));
+       await tx.run(DELETE.from('UnusedRoles').where({ auditRunID_ID: auditRunID }));
+       console.log('✅ Cleared existing role target data');
+       // STEP 2: Fetch RBPRules with expansion
+       let skip = 0;
+       const top = 50;
+       let hasMore = true;
+       let totalRules = 0;
+       let totalTargetsCreated = 0;
+       while (hasMore) {
+           try {
+               const url = `${sfConfig.baseURL}/RBPRule?$top=${top}&$skip=${skip}&$expand=targetGroups,roles&$format=json`;
+               console.log(`📡 Fetching rules: skip=${skip}`);
+               const response = await axios.get(url, {
+                   auth: sfConfig.auth,
+                   headers: sfConfig.headers,
+                   httpsAgent: sfConfig.httpsAgent,
+                   timeout: 30000
+               });
+               const rules = response.data?.d?.results || [];
+               console.log(`📦 Rules in batch: ${rules.length}`);
+               if (rules.length === 0) break;
+               for (const rule of rules) {
+                   totalRules++;
+                   // Handle targetGroups - always an object with results array
+                   let targetGroups = [];
+                   if (rule.targetGroups && rule.targetGroups.results) {
+                       targetGroups = rule.targetGroups.results;
+                   }
+                   // Handle roles - can be null, single object, or { results: [...] }
+                   let roles = [];
+                   if (rule.roles === null || rule.roles === undefined) {
+                       roles = [];
+                   } else if (Array.isArray(rule.roles)) {
+                       roles = rule.roles;
+                   } else if (rule.roles.results && Array.isArray(rule.roles.results)) {
+                       // Multiple roles: { results: [...] }
+                       roles = rule.roles.results;
+                   } else if (rule.roles.roleId || rule.roles.__metadata) {
+                       // Single role object (like rule 122)
+                       roles = [rule.roles];
+                   }
+                   // Debug first rule
+                   if (skip === 0 && totalRules === 1) {
+                       console.log('=== FIRST RULE STRUCTURE ===');
+                       console.log(`Rule ID: ${rule.ruleId}`);
+                       console.log(`targetGroups type: ${typeof rule.targetGroups}`);
+                       console.log(`targetGroups count: ${targetGroups.length}`);
+                       console.log(`roles type: ${typeof rule.roles}`);
+                       console.log(`roles count: ${roles.length}`);
+                       if (targetGroups.length > 0) {
+                           console.log('Sample targetGroup:', JSON.stringify(targetGroups[0], null, 2));
+                       }
+                       if (roles.length > 0) {
+                           console.log('Sample role:', JSON.stringify(roles[0], null, 2));
+                       }
+                   }
+                   // Insert for each target group (even if no roles)
+                   for (const group of targetGroups) {
+                       if (roles.length > 0) {
+                           // Insert a record for each role
+                           for (const role of roles) {
+                               try {
+                                   await tx.run(`
+                                       INSERT INTO sap_sf_audit_RoleTargetPopulations (
+                                           ID, auditRunID_ID, roleId, roleName,
+                                           groupId, groupName, groupType,
+                                           activeMembershipCount, totalMemberCount,
+                                           source, ruleId, ruleMyFilter, ruleStatus
+                                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                   `, [
+                                       uuidv4(),
+                                       auditRunID,
+                                       String(role.roleId || role.id || ''),
+                                       role.roleName || role.name || '',
+                                       String(group.groupID || group.groupId || group.id || ''),
+                                       group.groupName || group.name || '',
+                                       group.groupType || '',
+                                       parseInt(group.activeMembershipCount) || 0,
+                                       parseInt(group.totalMemberCount) || 0,
+                                       'RBPRule',
+                                       String(rule.ruleId || ''),
+                                       rule.myFilter || '',
+                                       parseInt(rule.status) || 0
+                                   ]);
+                                   totalTargetsCreated++;
+                               } catch (insertError) {
+                                   console.error(`Insert failed for rule ${rule.ruleId}:`, insertError.message);
+                               }
+                           }
+                       } else {
+                           // No roles in this rule - still record the target group
+                           try {
+                               await tx.run(`
+                                   INSERT INTO sap_sf_audit_RoleTargetPopulations (
+                                       ID, auditRunID_ID, roleId, roleName,
+                                       groupId, groupName, groupType,
+                                       activeMembershipCount, totalMemberCount,
+                                       source, ruleId, ruleMyFilter, ruleStatus
+                                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               `, [
+                                   uuidv4(),
+                                   auditRunID,
+                                   '',  // No role
+                                   '',
+                                   String(group.groupID || group.groupId || group.id || ''),
+                                   group.groupName || group.name || '',
+                                   group.groupType || '',
+                                   parseInt(group.activeMembershipCount) || 0,
+                                   parseInt(group.totalMemberCount) || 0,
+                                   'RBPRule',
+                                   String(rule.ruleId || ''),
+                                   rule.myFilter || '',
+                                   parseInt(rule.status) || 0
+                               ]);
+                               totalTargetsCreated++;
+                           } catch (insertError) {
+                               console.error(`Insert failed for rule ${rule.ruleId}:`, insertError.message);
+                           }
+                       }
+                   }
+               }
+               hasMore = rules.length === top;
+               skip += top;
+           } catch (error) {
+               console.error('Batch fetch error:', error.message);
+               auditLogger.error({ error: error.message }, 'Failed to fetch RBPRules batch');
+               hasMore = false;
+           }
+       }
+       console.log(`\n✅ Total rules processed: ${totalRules}`);
+       console.log(`✅ Total role targets created: ${totalTargetsCreated}\n`);
+       // STEP 3: Populate UnusedRoles
+       const rolesWithTargets = await tx.run(`
+           SELECT DISTINCT roleId
+           FROM sap_sf_audit_RoleTargetPopulations
+           WHERE auditRunID_ID = ? AND roleId != ''
+       `, [auditRunID]);
+       const usedRoleIds = new Set(rolesWithTargets.map(r => r.ROLEID));
+       console.log(`📊 Roles with targets: ${usedRoleIds.size}`);
+       const roles = await tx.run(
+           SELECT.from('Roles').where({ auditRunID_ID: auditRunID })
+       );
+       console.log(`📊 Total roles in system: ${roles.length}`);
+       let unusedCount = 0;
+       for (const role of roles) {
+           if (!usedRoleIds.has(role.roleId)) {
+               await tx.run(`
+                   INSERT INTO sap_sf_audit_UnusedRoles (
+                       ID, auditRunID_ID, roleId, roleName, roleType, recommendation
+                   ) VALUES (?, ?, ?, ?, ?, ?)
+               `, [
+                   uuidv4(),
+                   auditRunID,
+                   role.roleId,
+                   role.roleName,
+                   role.roleType || 'standard',
+                   'Review / Decommission'
+               ]);
+               unusedCount++;
+           }
+       }
+       console.log(`✅ Unused roles created: ${unusedCount}\n`);
+auditLogger.info({
+           totalRules,
+           totalTargetsCreated,
+           unusedCount
+       }, 'Role targets and unused roles populated');
+   } catch (error) {
+       console.error('❌ _populateRoleTargetsAndUnusedRoles FAILED:', error.message);
+       auditLogger.error({ error: error.message, stack: error.stack }, 'Failed to populate role targets');
+   }
 }
 
   async function _populateUserRoleMappings(tx, auditRunID, auditLogger) {
@@ -822,10 +957,18 @@ async function _upsertUsers(tx, users, instance, auditLogger) {
         
         // Use raw SQL for better compatibility
         await tx.run(`
-            INSERT INTO sap_sf_audit_UserRoleMappings 
-            (ID, auditRunID_ID, userId, userName, roleId, roleName, assignedViaGroup)
-            SELECT 
-                ?,
+           INSERT INTO sap_sf_audit_UserRoleMappings
+                (
+                ID,
+                auditRunID_ID,
+                userId,
+                userName,
+                roleId,
+                roleName,
+                assignedViaGroup
+                )
+                SELECT
+                SYSUUID,
                 ?,
                 gm.userId,
                 gm.userName,
@@ -837,7 +980,7 @@ async function _upsertUsers(tx, users, instance, auditLogger) {
                 ON rtp.groupId = gm.groupID 
             WHERE gm.auditRunID_ID = ? 
                 AND rtp.auditRunID_ID = ?
-        `, [uuidv4(), auditRunID, auditRunID, auditRunID]);
+        `, [auditRunID, auditRunID, auditRunID]);
         
         // Check how many were inserted
         const count = await tx.run(`
@@ -992,7 +1135,7 @@ async function _upsertUsers(tx, users, instance, auditLogger) {
                 INSERT INTO sap_sf_audit_MultiGroupUsers 
                 (ID, auditRunID_ID, userId, userName, groupCount, groupNames, riskLevel, riskScore, riskCategory, recommendedAction)
                 SELECT 
-                    ? AS ID,
+                    SYSUUID AS ID,
                     ? AS auditRunID_ID,
                     userId,
                     MAX(userName) AS userName,
@@ -1018,7 +1161,7 @@ async function _upsertUsers(tx, users, instance, auditLogger) {
                 WHERE auditRunID_ID = ?
                 GROUP BY userId
                 HAVING COUNT(*) >= 2
-            `, [uuidv4(), auditRunID, auditRunID]);
+            `, [auditRunID, auditRunID]);
             auditLogger.info('Multi-group users populated');
         } catch (error) {
             auditLogger.error({ error: error.message }, 'Failed to populate multi-group users');
@@ -1035,8 +1178,8 @@ async function _upsertUsers(tx, users, instance, auditLogger) {
         await tx.run(`
             INSERT INTO sap_sf_audit_InactiveUserAccess 
             (ID, auditRunID_ID, userId, userName, firstName, lastName, status, hireDate, permissionGroups, groupCount, riskScore, riskCategory, recommendedAction)
-            SELECT 
-                ?,
+            SELECT
+                SYSUUID,
                 ?,
                 u.userId,
                 u.userName,
@@ -1054,7 +1197,7 @@ async function _upsertUsers(tx, users, instance, auditLogger) {
             WHERE u.status = 'inactive' 
                 AND gm.auditRunID_ID = ?
             GROUP BY u.userId, u.userName, u.firstName, u.lastName, u.status, u.hireDate
-        `, [uuidv4(), auditRunID, auditRunID]);
+        `, [auditRunID, auditRunID]);
         
         const result = await tx.run(`SELECT COUNT(*) as cnt FROM sap_sf_audit_InactiveUserAccess WHERE auditRunID_ID = ?`, [auditRunID]);
         auditLogger.info({ insertedCount: result[0]?.CNT }, 'Inactive users with access populated');
@@ -1109,7 +1252,7 @@ async function _upsertUsers(tx, users, instance, auditLogger) {
                 INSERT INTO sap_sf_audit_StaticVsDynamicGroups 
                 (ID, auditRunID_ID, groupType, averageGroupSize, totalGroups, totalMembers)
                 SELECT 
-                    ? AS ID,
+                    SYSUUID AS ID,
                     ? AS auditRunID_ID,
                     groupType,
                     AVG(totalMemberCount) AS averageGroupSize,
@@ -1118,7 +1261,7 @@ async function _upsertUsers(tx, users, instance, auditLogger) {
                 FROM sap_sf_audit_Groups
                 WHERE auditRunID_ID = ?
                 GROUP BY groupType
-            `, [uuidv4(), auditRunID, auditRunID]);
+            `, [auditRunID, auditRunID]);
             auditLogger.info('Static vs dynamic groups populated');
         } catch (error) {
             auditLogger.error({ error: error.message }, 'Failed to populate static vs dynamic groups');
@@ -1209,11 +1352,15 @@ async function _upsertUsers(tx, users, instance, auditLogger) {
     
     try {
         // Check if users already exist for this instance
-        const existingUserCount = await tx.run(`
-            SELECT COUNT(*) as count FROM "SAP_SF_AUDIT_USERS" WHERE "INSTANCE" = ?
-        `, [instance]);
-        
-        const userCount = Number(existingUserCount[0]?.COUNT || 0);
+       const existingUserCount = await tx.run(`
+            SELECT COUNT(*) AS CNT
+            FROM SAP_SF_AUDIT_USERS
+            WHERE INSTANCE = ?
+            `, [instance]);
+
+        const userCount = Number(existingUserCount[0]?.CNT || 0);
+
+        console.log('Existing users:', userCount);
         
         if (userCount > 0) {
             await tx.commit();
@@ -1429,10 +1576,14 @@ async function _upsertUsers(tx, users, instance, auditLogger) {
 
             // PHASE 1: USER SYNC
             activeRun.message = 'Checking user sync status for instance...';
-            const existingUserCount = await tx.run(
-                SELECT.one.from('Users').where({ instance: instance }).columns('count(*) as count')
-            );
-            const userCount = Number(existingUserCount[0]?.count || 0);
+           const existingUserCount = await tx.run(
+    SELECT.one.from('Users')
+        .where({ instance: instance })
+        .columns('count(*) as count')
+);
+
+const userCount = Number(existingUserCount[0]?.count || 0);
+
 
             if (userCount === 0) {
                 auditLogger.info({ instance }, 'No users found for this instance - performing full sync');

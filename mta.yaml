@@ -70,6 +70,7 @@ resources:
     type: com.sap.xs.hdi-container
     parameters:
       service: hana
+      service-name: Sf-latest-hdi
       service-plan: hdi-shared
   - name: sf-permission-audit-destination
     type: org.cloudfoundry.managed-service

@@ -108,12 +108,12 @@ POST {{baseUrl}}/SuccessFactorRBPAudit/AuditRuns
 Content-Type: application/json
 
 {
-    "name": "FULL AUDIT - Groups Only",
-    "description": "Complete audit of all groups and members",
+    "name": "FULL AUDIT",
+    "description": "Complete audit-4",
     "mode": "FULL",
     "instance": "successfactors",
     "extractGroups": true,
-    "extractRoles": false,
+    "extractRoles": true,
     "sampleGroupSize": 0,
     "sampleMemberSize": 0,
     "sampleRoleSize": 0
@@ -152,7 +152,7 @@ Content-Type: application/json
 }
 
 ### 3.4 Get Audit Status (Replace YOUR_ID with actual ID)
-GET {{baseUrl}}/SuccessFactorRBPAudit/getAuditStatus(auditRunID=YOUR_ID)
+POST {{baseUrl}}/SuccessFactorRBPAudit/getAuditStatus(auditRunID=773856c8-5a62-4c0b-93b8-23800d99e5b2)
 Content-Type: application/json
 
 ### 3.5 Get Audit Status using POST
@@ -160,7 +160,7 @@ POST {{baseUrl}}/SuccessFactorRBPAudit/getAuditStatus
 Content-Type: application/json
 
 {
-    "auditRunID": "f833dcc5-1dac-460f-bb65-2b9ff1542d94"
+    "auditRunID": "773856c8-5a62-4c0b-93b8-23800d99e5b2"
 }
 
 ### 3.6 List all audit runs
@@ -189,24 +189,24 @@ GET http://localhost:4004/SuccessFactorRBPReport/getGroupMembersDetails
 Content-Type: application/json
 
 {
-    "auditRunID": "f833dcc5-1dac-460f-bb65-2b9ff1542d94",
+    "auditRunID": "773856c8-5a62-4c0b-93b8-23800d99e5b2",
     "top": 20,
     "skip": 0
 }
 
 ### Get members for specific group
-POST http://localhost:4004/SuccessFactorRBPReport/getGroupMembersDetails
+GET http://localhost:4004/SuccessFactorRBPReport/getGroupMembersDetails
 Content-Type: application/json
 
 {
-    "auditRunID": "f833dcc5-1dac-460f-bb65-2b9ff1542d94",
+    "auditRunID": "773856c8-5a62-4c0b-93b8-23800d99e5b2",
     "groupID": "1686",
     "top": 20,
     "skip": 0
 }
 
 ### Filter by department
-POST http://localhost:4004/SuccessFactorRBPReport/getGroupMembersDetails
+GET http://localhost:4004/SuccessFactorRBPReport/getGroupMembersDetails
 Content-Type: application/json
 
 {
@@ -236,51 +236,51 @@ Content-Type: application/json
 ### ============================================
 
 ### 4.1 Get Groups for audit run (Replace YOUR_ID)
-GET {{baseUrl}}/SuccessFactorRBPAudit/Groups?$filter=auditRunID_ID eq 'f833dcc5-1dac-460f-bb65-2b9ff1542d94'&$top=20
+GET {{baseUrl}}/SuccessFactorRBPAudit/Groups?$filter=auditRunID_ID eq '773856c8-5a62-4c0b-93b8-23800d99e5b2'&$top=20
 Content-Type: application/json
 
 ### 4.2 Get Group Members
-GET {{baseUrl}}/SuccessFactorRBPAudit/GroupMembers?$filter=auditRunID_ID eq 'f833dcc5-1dac-460f-bb65-2b9ff1542d94'&$top=50
+GET {{baseUrl}}/SuccessFactorRBPAudit/GroupMembers?$filter=auditRunID_ID eq '773856c8-5a62-4c0b-93b8-23800d99e5b2'&$top=50
 Content-Type: application/json
 
 ### 4.3 Get Roles (if extracted)
-GET {{baseUrl}}/SuccessFactorRBPAudit/Roles?$filter=auditRunID_ID eq 'f833dcc5-1dac-460f-bb65-2b9ff1542d94'&$top=20
+GET {{baseUrl}}/SuccessFactorRBPAudit/Roles?$filter=auditRunID_ID eq '773856c8-5a62-4c0b-93b8-23800d99e5b2'&$top=20
 Content-Type: application/json
 
 ### 4.4 Get Role Target Populations
-GET {{baseUrl}}/SuccessFactorRBPAudit/RoleTargetPopulations?$filter=auditRunID_ID eq 'f833dcc5-1dac-460f-bb65-2b9ff1542d94'&$top=20
+GET {{baseUrl}}/SuccessFactorRBPAudit/RoleTargetPopulations?$filter=auditRunID_ID eq '773856c8-5a62-4c0b-93b8-23800d99e5b2'&$top=20
 Content-Type: application/json
 
 ### 4.5 Get User Role Mappings
-GET {{baseUrl}}/SuccessFactorRBPAudit/UserRoleMappings?$filter=auditRunID_ID eq 'f833dcc5-1dac-460f-bb65-2b9ff1542d94'&$top=20
+GET {{baseUrl}}/SuccessFactorRBPAudit/UserRoleMappings?$filter=auditRunID_ID eq '773856c8-5a62-4c0b-93b8-23800d99e5b2'&$top=20
 Content-Type: application/json
 
 ### 4.6 Get Multi-Group Users (Risk Analysis)
-GET {{baseUrl}}/SuccessFactorRBPAudit/MultiGroupUsers?$filter=auditRunID_ID eq 'f833dcc5-1dac-460f-bb65-2b9ff1542d94'&$top=20
+GET {{baseUrl}}/SuccessFactorRBPAudit/MultiGroupUsers?$filter=auditRunID_ID eq '773856c8-5a62-4c0b-93b8-23800d99e5b2'&$top=20
 Content-Type: application/json
 
 ### 4.7 Get Inactive Users with Access
-GET {{baseUrl}}/SuccessFactorRBPAudit/InactiveUserAccess?$filter=auditRunID_ID eq 'f833dcc5-1dac-460f-bb65-2b9ff1542d94'&$top=20
+GET {{baseUrl}}/SuccessFactorRBPAudit/InactiveUserAccess?$filter=auditRunID_ID eq '773856c8-5a62-4c0b-93b8-23800d99e5b2'&$top=20
 Content-Type: application/json
 
 ### 4.8 Get Group Size Distribution
-GET {{baseUrl}}/SuccessFactorRBPAudit/GroupSizeDistribution?$filter=auditRunID_ID eq '23faf2af-8fa0-4b51-b13c-e646a7b000d9'
+GET {{baseUrl}}/SuccessFactorRBPAudit/GroupSizeDistribution?$filter=auditRunID_ID eq '773856c8-5a62-4c0b-93b8-23800d99e5b2'
 Content-Type: application/json
 
 ### 4.9 Get Static vs Dynamic Groups
-GET {{baseUrl}}/SuccessFactorRBPAudit/StaticVsDynamicGroups?$filter=auditRunID_ID eq '23faf2af-8fa0-4b51-b13c-e646a7b000d9'
+GET {{baseUrl}}/SuccessFactorRBPAudit/StaticVsDynamicGroups?$filter=auditRunID_ID eq '773856c8-5a62-4c0b-93b8-23800d99e5b2'
 Content-Type: application/json
 
 ### 4.10 Get User Group Count Distribution
-GET {{baseUrl}}/SuccessFactorRBPAudit/UserGroupCountDistribution?$filter=auditRunID_ID eq '23faf2af-8fa0-4b51-b13c-e646a7b000d9'
+GET {{baseUrl}}/SuccessFactorRBPAudit/UserGroupCountDistribution?$filter=auditRunID_ID eq '773856c8-5a62-4c0b-93b8-23800d99e5b2'
 Content-Type: application/json
 
 ### 4.11 Get Unused Roles
-GET {{baseUrl}}/SuccessFactorRBPAudit/UnusedRoles?$filter=auditRunID_ID eq '23faf2af-8fa0-4b51-b13c-e646a7b000d9'
+GET {{baseUrl}}/SuccessFactorRBPAudit/UnusedRoles?$filter=auditRunID_ID eq '773856c8-5a62-4c0b-93b8-23800d99e5b2'
 Content-Type: application/json
 
 ### 4.12 Get Executive Summary
-GET {{baseUrl}}/SuccessFactorRBPAudit/ExecutiveSummary?$filter=auditRunID_ID eq '23faf2af-8fa0-4b51-b13c-e646a7b000d9'
+GET {{baseUrl}}/SuccessFactorRBPAudit/ExecutiveSummary?$filter=auditRunID_ID eq '773856c8-5a62-4c0b-93b8-23800d99e5b2'
 Content-Type: application/json
 
 ### ============================================
@@ -292,7 +292,7 @@ GET {{baseUrl}}/SuccessFactorRBPReport/getRiskDashboard
 Content-Type: application/json
 
 {
-    "auditRunID": "23faf2af-8fa0-4b51-b13c-e646a7b000d9"
+    "auditRunID": "773856c8-5a62-4c0b-93b8-23800d99e5b2"
 }
 
 ### 5.2 Get Executive Summary
@@ -300,7 +300,7 @@ GET {{baseUrl}}/SuccessFactorRBPReport/getExecutiveSummary
 Content-Type: application/json
 
 {
-    "auditRunID": "23faf2af-8fa0-4b51-b13c-e646a7b000d9"
+    "auditRunID": "773856c8-5a62-4c0b-93b8-23800d99e5b2"
 }
 
 ### 5.3 Get Group Details
@@ -308,7 +308,7 @@ GET {{baseUrl}}/SuccessFactorRBPReport/getGroupDetails
 Content-Type: application/json
 
 {
-    "auditRunID": "23faf2af-8fa0-4b51-b13c-e646a7b000d9",
+    "auditRunID": "773856c8-5a62-4c0b-93b8-23800d99e5b2",
     "top": 20,
     "skip": 0
 }
@@ -318,7 +318,7 @@ GET {{baseUrl}}/SuccessFactorRBPReport/getGroupSizeAnalysis
 Content-Type: application/json
 
 {
-    "auditRunID": "23faf2af-8fa0-4b51-b13c-e646a7b000d9"
+    "auditRunID": "773856c8-5a62-4c0b-93b8-23800d99e5b2"
 }
 
 ### 5.5 Get User Access Analysis
@@ -326,7 +326,7 @@ GET {{baseUrl}}/SuccessFactorRBPReport/getUserAccessAnalysis
 Content-Type: application/json
 
 {
-    "auditRunID": "23faf2af-8fa0-4b51-b13c-e646a7b000d9",
+    "auditRunID": "773856c8-5a62-4c0b-93b8-23800d99e5b2",
     "top": 20
 }
 
@@ -406,7 +406,7 @@ GET {{baseUrl}}/SuccessFactorRBPReport/getUsersByRole
 Content-Type: application/json
 
 {
-    "auditRunID": "23faf2af-8fa0-4b51-b13c-e646a7b000d9",
+    "auditRunID": "773856c8-5a62-4c0b-93b8-23800d99e5b2",
     "roleId": "1003500",
     "top": 20,
     "skip": 0
